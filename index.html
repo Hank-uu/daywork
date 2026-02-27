@@ -142,10 +142,20 @@
     const Settings = (p) => <Icon name="Settings" {...p} />;
 
     // --- Firebase 設定 ---
-    // 預設給一組 dummy 設定以確保「本機模式」在沒有配置檔時不會崩潰
-    const firebaseConfig = typeof __firebase_config !== 'undefined' 
-        ? JSON.parse(__firebase_config) 
-        : { apiKey: "dummy", projectId: "dummy", appId: "dummy" }; 
+    let isFirebaseConfigured = false;
+    let firebaseConfig = { apiKey: "dummy", projectId: "dummy", appId: "dummy" };
+    if (typeof __firebase_config !== 'undefined') {
+      try {
+        const parsed = JSON.parse(__firebase_config);
+        if (parsed && Object.keys(parsed).length > 0) {
+          firebaseConfig = parsed;
+          isFirebaseConfigured = true;
+        }
+      } catch (e) {
+        console.error("Firebase config parse error", e);
+      }
+    }
+    
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = getFirestore(app);
@@ -266,6 +276,10 @@
       const loadDefaultActivities = async () => {
         setIsLoading(true);
         if (storageMode === 'cloud' && currentUser) {
+          if (!isFirebaseConfigured) {
+             setIsLoading(false);
+             return;
+          }
           try {
             const safeUsername = currentUser.replace(/\//g, '_');
             for (const act of INITIAL_ACTIVITIES) {
@@ -288,9 +302,12 @@
         const newActivity = { id: newId, name: newActivityName.trim(), records: [] };
 
         if (storageMode === 'cloud' && currentUser) {
-          const safeUsername = currentUser.replace(/\//g, '_');
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', `activities_${safeUsername}`, newId);
-          await setDoc(docRef, newActivity);
+          if (!isFirebaseConfigured) return;
+          try {
+            const safeUsername = currentUser.replace(/\//g, '_');
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', `activities_${safeUsername}`, newId);
+            await setDoc(docRef, newActivity);
+          } catch (err) { console.error(err); }
         } else if (storageMode === 'local') {
           setActivities(prev => [...prev, newActivity]);
         }
@@ -305,9 +322,12 @@
         const now = new Date().toISOString();
 
         if (storageMode === 'cloud' && currentUser) {
-          const safeUsername = currentUser.replace(/\//g, '_');
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', `activities_${safeUsername}`, id);
-          await updateDoc(docRef, { records: [...activity.records, now] });
+          if (!isFirebaseConfigured) return;
+          try {
+            const safeUsername = currentUser.replace(/\//g, '_');
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', `activities_${safeUsername}`, id);
+            await updateDoc(docRef, { records: [...activity.records, now] });
+          } catch (err) {}
         } else if (storageMode === 'local') {
           setActivities(prev => prev.map(act => 
             act.id === id ? { ...act, records: [...act.records, now] } : act
@@ -317,9 +337,12 @@
 
       const handleDeleteActivity = async (id) => {
         if (storageMode === 'cloud' && currentUser) {
-          const safeUsername = currentUser.replace(/\//g, '_');
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', `activities_${safeUsername}`, id);
-          await deleteDoc(docRef);
+          if (!isFirebaseConfigured) return;
+          try {
+            const safeUsername = currentUser.replace(/\//g, '_');
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', `activities_${safeUsername}`, id);
+            await deleteDoc(docRef);
+          } catch (err) {}
         } else if (storageMode === 'local') {
           setActivities(prev => prev.filter(act => act.id !== id));
         }
@@ -334,9 +357,12 @@
         const filteredRecords = activity.records.filter(r => new Date(r).getTime() >= cutoffTime);
         
         if (storageMode === 'cloud' && currentUser) {
-          const safeUsername = currentUser.replace(/\//g, '_');
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', `activities_${safeUsername}`, id);
-          await updateDoc(docRef, { records: filteredRecords });
+          if (!isFirebaseConfigured) return;
+          try {
+            const safeUsername = currentUser.replace(/\//g, '_');
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', `activities_${safeUsername}`, id);
+            await updateDoc(docRef, { records: filteredRecords });
+          } catch (err) {}
         } else if (storageMode === 'local') {
           setActivities(prev => prev.map(act => 
             act.id === id ? { ...act, records: filteredRecords } : act
@@ -361,24 +387,31 @@
               <h1 className="text-2xl font-bold text-center text-gray-800 mb-2">紀錄小幫手</h1>
               <p className="text-center text-gray-500 mb-8 text-sm">請選擇您的使用方式</p>
               
-              <form onSubmit={handleLoginCloud} className="space-y-4">
-                <div>
-                  <input
-                    type="text"
-                    value={usernameInput}
-                    onChange={(e) => setUsernameInput(e.target.value)}
-                    placeholder="輸入名稱 (雲端同步使用)"
-                    className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition shadow-sm"
-                  />
+              {isFirebaseConfigured ? (
+                <form onSubmit={handleLoginCloud} className="space-y-4">
+                  <div>
+                    <input
+                      type="text"
+                      value={usernameInput}
+                      onChange={(e) => setUsernameInput(e.target.value)}
+                      placeholder="輸入名稱 (雲端同步使用)"
+                      className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition shadow-sm"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={!usernameInput.trim()}
+                    className="w-full bg-blue-600 text-white rounded-xl px-4 py-3 font-bold shadow-md hover:bg-blue-700 disabled:bg-blue-300 transition"
+                  >
+                    啟用雲端同步
+                  </button>
+                </form>
+              ) : (
+                <div className="bg-orange-50 border border-orange-200 text-orange-800 p-4 rounded-xl text-sm mb-4">
+                  <p className="font-bold flex items-center gap-1 mb-1">⚠️ 雲端功能未啟用</p>
+                  <p>因為您是在本機直接開啟此檔案，沒有連結到資料庫，因此僅能使用「本機模式」哦！</p>
                 </div>
-                <button
-                  type="submit"
-                  disabled={!usernameInput.trim()}
-                  className="w-full bg-blue-600 text-white rounded-xl px-4 py-3 font-bold shadow-md hover:bg-blue-700 disabled:bg-blue-300 transition"
-                >
-                  啟用雲端同步
-                </button>
-              </form>
+              )}
 
               <div className="relative flex py-6 items-center">
                 <div className="flex-grow border-t border-gray-200"></div>
@@ -677,6 +710,11 @@
 
       const handleLocalToCloud = async () => {
         setIsProcessing(true);
+        if (!isFirebaseConfigured) {
+          showMessage('❌ 尚未連結雲端資料庫。');
+          setIsProcessing(false);
+          return;
+        }
         try {
           const localData = JSON.parse(localStorage.getItem('activityTrackerData_local') || '[]');
           const safeUsername = currentUser.replace(/\//g, '_');
@@ -710,6 +748,11 @@
 
       const handleDeleteCloud = async () => {
         setIsProcessing(true);
+        if (!isFirebaseConfigured) {
+          showMessage('❌ 尚未連結雲端資料庫。');
+          setIsProcessing(false);
+          return;
+        }
         try {
           const safeUsername = currentUser.replace(/\//g, '_');
           const colPath = `activities_${safeUsername}`;
