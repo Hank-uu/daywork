@@ -107,6 +107,11 @@
           <path d="M12 18h.01" />
         </React.Fragment>
       ),
+      Folder: (
+        <React.Fragment>
+          <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+        </React.Fragment>
+      ),
       Settings: (
         <React.Fragment>
           <circle cx="12" cy="12" r="3" />
@@ -159,6 +164,7 @@
     const User = (p) => <Icon name="User" {...p} />;
     const Cloud = (p) => <Icon name="Cloud" {...p} />;
     const Smartphone = (p) => <Icon name="Smartphone" {...p} />;
+    const Folder = (p) => <Icon name="Folder" {...p} />;
     const Settings = (p) => <Icon name="Settings" {...p} />;
     const Edit2 = (p) => <Icon name="Edit2" {...p} />;
     const Palette = (p) => <Icon name="Palette" {...p} />;
@@ -182,9 +188,9 @@
     const generateId = () => Math.random().toString(36).substr(2, 9);
 
     const INITIAL_ACTIVITIES = [
-      { id: generateId(), name: '吃藥', records: [] },
-      { id: generateId(), name: '清洗冷氣濾網', records: [] },
-      { id: generateId(), name: '運動', records: [] },
+      { id: generateId(), name: '吃藥', records: [], groupId: 'default' },
+      { id: generateId(), name: '清洗冷氣濾網', records: [], groupId: 'default' },
+      { id: generateId(), name: '運動', records: [], groupId: 'default' },
     ];
 
     // --- 主題設定 (Themes) ---
@@ -227,23 +233,26 @@
     function App() {
       const [authUser, setAuthUser] = useState(null);
       const [showSettings, setShowSettings] = useState(false);
-      
       const [storageMode, setStorageMode] = useState(() => localStorage.getItem('tracker_storage_mode') || null);
-      
       const [themeColor, setThemeColor] = useState(() => localStorage.getItem('tracker_theme_color') || 'blue');
       const [headerText, setHeaderText] = useState(() => localStorage.getItem('tracker_header_text') || 'text-white');
       
       const [activities, setActivities] = useState([]);
-      const [isLoading, setIsLoading] = useState(true);
+      const [groups, setGroups] = useState([]);
+      const [isActsLoading, setIsActsLoading] = useState(true);
+      const [isGrpsLoading, setIsGrpsLoading] = useState(true);
+      const isLoading = isActsLoading || isGrpsLoading;
+
       const [newActivityName, setNewActivityName] = useState('');
       const [selectedActivityId, setSelectedActivityId] = useState(null);
+      const [selectedGroupId, setSelectedGroupId] = useState('default');
 
+      const allGroups = useMemo(() => [{ id: 'default', name: '預設群組' }, ...groups], [groups]);
       const displayName = authUser ? (authUser.displayName || authUser.email) : '本機使用者';
 
       useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (user) => {
           setAuthUser(user);
-          // 如果使用者登出，但目前是雲端模式，則重置狀態
           if (!user && storageMode === 'cloud') {
             setStorageMode(null);
             localStorage.removeItem('tracker_storage_mode');
@@ -255,46 +264,54 @@
       useEffect(() => {
         if (storageMode === 'cloud') {
           if (!authUser) {
-            setIsLoading(false);
+            setIsActsLoading(false);
+            setIsGrpsLoading(false);
             return;
           }
-          setIsLoading(true);
-          // 雲端路徑：依據 Google 帳號的 UID 分開儲存
-          const colRef = collection(db, 'users', authUser.uid, 'activities');
-          
-          const unsubscribe = onSnapshot(colRef, (snapshot) => {
+          setIsActsLoading(true);
+          setIsGrpsLoading(true);
+
+          const colRefActs = collection(db, 'users', authUser.uid, 'activities');
+          const unsubscribeActs = onSnapshot(colRefActs, (snapshot) => {
             const data = snapshot.docs.map(doc => doc.data());
             data.sort((a, b) => a.id.localeCompare(b.id)); 
             setActivities(data);
-            setIsLoading(false);
+            setIsActsLoading(false);
           }, (error) => {
             console.error("Firestore error:", error);
-            setIsLoading(false);
-            // 偵測權限錯誤
-            if (error.code === 'permission-denied') {
-              alert("❌ 資料庫權限不足！\n\n請至 Firebase 控制台 -> Firestore Database -> Rules (規則)。\n將規則修改為：\nallow read, write: if request.auth != null;");
-            }
+            setIsActsLoading(false);
           });
 
-          return () => unsubscribe();
+          const grpsRef = collection(db, 'users', authUser.uid, 'groups');
+          const unsubscribeGrps = onSnapshot(grpsRef, (snapshot) => {
+            const data = snapshot.docs.map(doc => doc.data());
+            data.sort((a, b) => a.name.localeCompare(b.name));
+            setGroups(data);
+            setIsGrpsLoading(false);
+          }, (error) => {
+            setIsGrpsLoading(false);
+          });
+
+          return () => { unsubscribeActs(); unsubscribeGrps(); };
         } 
         
         if (storageMode === 'local') {
-          const saved = localStorage.getItem('activityTrackerData_local') || localStorage.getItem('activityTrackerData');
-          if (saved) {
-            try { setActivities(JSON.parse(saved)); } catch (e) { setActivities([]); }
-          } else {
-            setActivities([]);
-          }
-          setIsLoading(false);
+          const savedActs = localStorage.getItem('activityTrackerData_local') || localStorage.getItem('activityTrackerData');
+          if (savedActs) { try { setActivities(JSON.parse(savedActs)); } catch (e) { setActivities([]); } } else { setActivities([]); }
+          setIsActsLoading(false);
+
+          const savedGrps = localStorage.getItem('activityTrackerGroups_local');
+          if (savedGrps) { try { setGroups(JSON.parse(savedGrps)); } catch (e) { setGroups([]); } } else { setGroups([]); }
+          setIsGrpsLoading(false);
         }
       }, [authUser, storageMode]);
 
       useEffect(() => {
         if (storageMode === 'local') {
           localStorage.setItem('activityTrackerData_local', JSON.stringify(activities));
+          localStorage.setItem('activityTrackerGroups_local', JSON.stringify(groups));
         }
-      }, [activities, storageMode]);
+      }, [activities, groups, storageMode]);
 
       useEffect(() => {
         localStorage.setItem('tracker_theme_color', themeColor);
@@ -312,16 +329,7 @@
           setStorageMode('cloud');
           localStorage.setItem('tracker_storage_mode', 'cloud');
         } catch (error) {
-          console.error("Login Error:", error);
-          if (error.code === 'auth/unauthorized-domain') {
-            alert(`❌ 網域未授權！\n\nFirebase 封鎖了來自目前網址的登入請求。\n\n解決方法：\n請至 Firebase 控制台 -> Authentication -> Settings (設定) -> Authorized domains (授權的網域)。\n點擊「新增網域」，然後輸入：\n${window.location.hostname}\n並儲存即可！`);
-          } else if (error.code === 'auth/operation-not-allowed') {
-             alert("❌ 尚未啟用 Google 登入！\n\n請至 Firebase 控制台 -> Authentication -> Sign-in method。\n新增提供者並「啟用 Google 登入」。");
-          } else if (error.code === 'auth/configuration-not-found') {
-             alert("❌ 找不到 Google 登入設定！\n\n請前往 Firebase 控制台的「Authentication」->「Sign-in method」，確定您已經新增了「Google」提供者並點擊了儲存。");
-          } else {
-            alert("登入失敗：" + error.message);
-          }
+          alert("登入失敗：" + error.message);
         }
       };
 
@@ -331,27 +339,20 @@
       };
 
       const handleLogout = async () => {
-        if (storageMode === 'cloud') {
-          await signOut(auth);
-        }
+        if (storageMode === 'cloud') await signOut(auth);
         setStorageMode(null);
         localStorage.removeItem('tracker_storage_mode');
         setActivities([]);
         setSelectedActivityId(null);
       };
 
-      // 錯誤捕捉輔助函式
       const handleCloudWriteError = (err) => {
         console.error(err);
-        if (err.code === 'permission-denied') {
-          alert("❌ 寫入失敗：沒有權限！\n請檢查您的 Firestore Rules 是否允許登入者寫入資料。");
-        } else {
-          alert("❌ 雲端操作失敗：" + err.message);
-        }
+        alert("雲端操作失敗：" + err.message);
       };
 
       const loadDefaultActivities = async () => {
-        setIsLoading(true);
+        setIsActsLoading(true);
         if (storageMode === 'cloud' && authUser) {
           try {
             for (const act of INITIAL_ACTIVITIES) {
@@ -361,14 +362,14 @@
         } else if (storageMode === 'local') {
           setActivities(INITIAL_ACTIVITIES);
         }
-        setIsLoading(false);
+        setIsActsLoading(false);
       };
 
       const handleAddActivity = async (e) => {
         e.preventDefault();
         if (!newActivityName.trim()) return;
         const newId = generateId();
-        const newActivity = { id: newId, name: newActivityName.trim(), records: [] };
+        const newActivity = { id: newId, name: newActivityName.trim(), records: [], groupId: selectedGroupId };
 
         if (storageMode === 'cloud' && authUser) {
           try {
@@ -380,48 +381,77 @@
         setNewActivityName('');
       };
 
-      const handleRenameActivity = async (id, newName) => {
-        if (!newName.trim()) return;
-        const activity = activities.find(a => a.id === id);
-        if (!activity) return;
+      const handleAddGroup = async (groupName) => {
+        if (!groupName.trim() || allGroups.length >= 31) return;
+        const newId = 'group_' + generateId();
+        const newGroup = { id: newId, name: groupName.trim() };
+        if (storageMode === 'cloud' && authUser) {
+          try { await setDoc(doc(db, 'users', authUser.uid, 'groups', newId), newGroup); } catch(err) { handleCloudWriteError(err); }
+        } else if (storageMode === 'local') {
+          setGroups(prev => [...prev, newGroup]);
+        }
+        setSelectedGroupId(newId);
+      };
 
+      const handleRenameGroup = async (id, newName) => {
+        if (id === 'default' || !newName.trim()) return;
+        if (storageMode === 'cloud' && authUser) {
+          try { await updateDoc(doc(db, 'users', authUser.uid, 'groups', id), { name: newName.trim() }); } catch(err) { handleCloudWriteError(err); }
+        } else if (storageMode === 'local') {
+          setGroups(prev => prev.map(g => g.id === id ? { ...g, name: newName.trim() } : g));
+        }
+      };
+
+      const handleDeleteGroup = async (id) => {
+        if (id === 'default') return;
+        const actsToMove = activities.filter(a => a.groupId === id);
         if (storageMode === 'cloud' && authUser) {
           try {
-            await updateDoc(doc(db, 'users', authUser.uid, 'activities', id), { name: newName.trim() });
-          } catch (err) { handleCloudWriteError(err); }
+            for (const act of actsToMove) {
+              await updateDoc(doc(db, 'users', authUser.uid, 'activities', act.id), { groupId: 'default' });
+            }
+            await deleteDoc(doc(db, 'users', authUser.uid, 'groups', id));
+          } catch(err) { handleCloudWriteError(err); }
         } else if (storageMode === 'local') {
-          setActivities(prev => prev.map(act => 
-            act.id === id ? { ...act, name: newName.trim() } : act
-          ));
+          setActivities(prev => prev.map(a => a.groupId === id ? { ...a, groupId: 'default' } : a));
+          setGroups(prev => prev.filter(g => g.id !== id));
+        }
+        setSelectedGroupId('default');
+      };
+
+      const handleMoveActivity = async (activityId, newGroupId) => {
+        if (storageMode === 'cloud' && authUser) {
+          try { await updateDoc(doc(db, 'users', authUser.uid, 'activities', activityId), { groupId: newGroupId }); } catch(err) { handleCloudWriteError(err); }
+        } else if (storageMode === 'local') {
+          setActivities(prev => prev.map(a => a.id === activityId ? { ...a, groupId: newGroupId } : a));
+        }
+      };
+
+      const handleRenameActivity = async (id, newName) => {
+        if (!newName.trim()) return;
+        if (storageMode === 'cloud' && authUser) {
+          try { await updateDoc(doc(db, 'users', authUser.uid, 'activities', id), { name: newName.trim() }); } catch (err) { handleCloudWriteError(err); }
+        } else if (storageMode === 'local') {
+          setActivities(prev => prev.map(act => act.id === id ? { ...act, name: newName.trim() } : act));
         }
       };
 
       const handleAddRecord = async (id, e) => {
         if (e) e.stopPropagation();
-        
         const activity = activities.find(a => a.id === id);
         if (!activity) return;
         const now = new Date().toISOString();
-
         if (storageMode === 'cloud' && authUser) {
-          try {
-            await updateDoc(doc(db, 'users', authUser.uid, 'activities', id), { records: [...activity.records, now] });
-          } catch (err) { handleCloudWriteError(err); }
+          try { await updateDoc(doc(db, 'users', authUser.uid, 'activities', id), { records: [...activity.records, now] }); } catch (err) { handleCloudWriteError(err); }
         } else if (storageMode === 'local') {
-          setActivities(prev => prev.map(act => 
-            act.id === id ? { ...act, records: [...act.records, now] } : act
-          ));
+          setActivities(prev => prev.map(act => act.id === id ? { ...act, records: [...act.records, now] } : act));
         }
       };
 
       const handleDeleteActivity = async (id) => {
-        // 【修正核心】先將畫面退回首頁，再執行刪除動作，避免畫面讀取不到已刪除的資料而崩潰
         setSelectedActivityId(null);
-        
         if (storageMode === 'cloud' && authUser) {
-          try {
-            await deleteDoc(doc(db, 'users', authUser.uid, 'activities', id));
-          } catch (err) { handleCloudWriteError(err); }
+          try { await deleteDoc(doc(db, 'users', authUser.uid, 'activities', id)); } catch (err) { handleCloudWriteError(err); }
         } else if (storageMode === 'local') {
           setActivities(prev => prev.filter(act => act.id !== id));
         }
@@ -430,35 +460,23 @@
       const handleDeleteRecord = async (id, recordStr) => {
         const activity = activities.find(a => a.id === id);
         if (!activity) return;
-
         const newRecords = activity.records.filter(r => r !== recordStr);
-        
         if (storageMode === 'cloud' && authUser) {
-          try {
-            await updateDoc(doc(db, 'users', authUser.uid, 'activities', id), { records: newRecords });
-          } catch (err) { handleCloudWriteError(err); }
+          try { await updateDoc(doc(db, 'users', authUser.uid, 'activities', id), { records: newRecords }); } catch (err) { handleCloudWriteError(err); }
         } else if (storageMode === 'local') {
-          setActivities(prev => prev.map(act => 
-            act.id === id ? { ...act, records: newRecords } : act
-          ));
+          setActivities(prev => prev.map(act => act.id === id ? { ...act, records: newRecords } : act));
         }
       };
 
       const handleClearRecords = async (id, beforeDateStr) => {
         const activity = activities.find(a => a.id === id);
         if (!activity) return;
-
         const cutoffTime = new Date(beforeDateStr).getTime();
         const filteredRecords = activity.records.filter(r => new Date(r).getTime() >= cutoffTime);
-        
         if (storageMode === 'cloud' && authUser) {
-          try {
-            await updateDoc(doc(db, 'users', authUser.uid, 'activities', id), { records: filteredRecords });
-          } catch (err) { handleCloudWriteError(err); }
+          try { await updateDoc(doc(db, 'users', authUser.uid, 'activities', id), { records: filteredRecords }); } catch (err) { handleCloudWriteError(err); }
         } else if (storageMode === 'local') {
-          setActivities(prev => prev.map(act => 
-            act.id === id ? { ...act, records: filteredRecords } : act
-          ));
+          setActivities(prev => prev.map(act => act.id === id ? { ...act, records: filteredRecords } : act));
         }
       };
 
@@ -470,37 +488,14 @@
             <div className="min-h-screen bg-gray-100 flex items-center justify-center font-sans p-4">
               <div className="bg-white p-8 rounded-2xl shadow-xl max-w-sm w-full">
                 <div className="flex justify-center gap-4 mb-6">
-                  <div className={`${themeValue.t.bgLight} p-4 rounded-full ${themeValue.t.text}`}>
-                    <Cloud size={32} />
-                  </div>
-                  <div className="bg-gray-100 p-4 rounded-full text-gray-600">
-                    <Smartphone size={32} />
-                  </div>
+                  <div className={`${themeValue.t.bgLight} p-4 rounded-full ${themeValue.t.text}`}><Cloud size={32} /></div>
+                  <div className="bg-gray-100 p-4 rounded-full text-gray-600"><Smartphone size={32} /></div>
                 </div>
                 <h1 className="text-2xl font-bold text-center text-gray-800 mb-2">紀錄小幫手</h1>
                 <p className="text-center text-gray-500 mb-8 text-sm">請選擇您的使用方式</p>
-                
-                <button
-                  onClick={handleLoginGoogle}
-                  className={`w-full ${themeValue.t.bg} text-white rounded-xl px-4 py-4 font-bold shadow-md ${themeValue.t.bgHover} transition flex items-center justify-center gap-2`}
-                >
-                  <User size={20} />
-                  以 Google 帳號登入 (雲端同步)
-                </button>
-
-                <div className="relative flex py-6 items-center">
-                  <div className="flex-grow border-t border-gray-200"></div>
-                  <span className="flex-shrink-0 mx-4 text-gray-400 text-sm">或</span>
-                  <div className="flex-grow border-t border-gray-200"></div>
-                </div>
-
-                <button
-                  onClick={handleLoginLocal}
-                  className="w-full bg-gray-100 text-gray-700 rounded-xl px-4 py-3 font-bold shadow-sm hover:bg-gray-200 transition flex items-center justify-center gap-2"
-                >
-                  <Smartphone size={20} />
-                  僅在本機使用 (免網路)
-                </button>
+                <button onClick={handleLoginGoogle} className={`w-full ${themeValue.t.bg} text-white rounded-xl px-4 py-4 font-bold shadow-md ${themeValue.t.bgHover} transition flex items-center justify-center gap-2`}><User size={20} /> 以 Google 帳號登入 (雲端同步)</button>
+                <div className="relative flex py-6 items-center"><div className="flex-grow border-t border-gray-200"></div><span className="flex-shrink-0 mx-4 text-gray-400 text-sm">或</span><div className="flex-grow border-t border-gray-200"></div></div>
+                <button onClick={handleLoginLocal} className="w-full bg-gray-100 text-gray-700 rounded-xl px-4 py-3 font-bold shadow-sm hover:bg-gray-200 transition flex items-center justify-center gap-2"><Smartphone size={20} /> 僅在本機使用 (免網路)</button>
               </div>
             </div>
           </AppThemeContext.Provider>
@@ -521,59 +516,25 @@
         <AppThemeContext.Provider value={themeValue}>
           <div className="min-h-screen bg-gray-100 font-sans text-gray-800">
             <div className="max-w-md mx-auto bg-white min-h-screen shadow-lg flex flex-col relative overflow-hidden">
-              
               <header className={`${themeValue.t.bg} ${themeValue.headerText} p-4 shadow-md z-10 flex items-center justify-between transition-colors duration-300`}>
                 <div className="flex items-center gap-2 flex-1 overflow-hidden">
                   {storageMode === 'cloud' ? <Cloud size={20} /> : <Smartphone size={20} />}
-                  <h1 className="text-xl font-bold truncate">
-                    {selectedActivity 
-                      ? selectedActivity.name 
-                      : (storageMode === 'cloud' ? `${displayName} 的紀錄` : '本機紀錄')}
-                  </h1>
+                  <h1 className="text-xl font-bold truncate">{selectedActivity ? selectedActivity.name : (storageMode === 'cloud' ? `${displayName} 的紀錄` : '本機紀錄')}</h1>
                 </div>
-                {/* 【修正】將判斷從 !selectedActivityId 改成 !selectedActivity，即使資料從雲端被刪除也能自動退回首頁防呆 */}
                 {!selectedActivity && (
                   <div className="flex items-center ml-2">
-                    <button onClick={() => setShowSettings(!showSettings)} className={`p-2 ${themeValue.t.bgHover} rounded-full transition`} title="設定與同步">
-                      {showSettings ? <X size={20} /> : <Settings size={20} />}
-                    </button>
-                    <button onClick={handleLogout} className={`p-2 ${themeValue.t.bgHover} rounded-full transition ml-1`} title="切換模式或帳號">
-                      <LogOut size={20} />
-                    </button>
+                    <button onClick={() => setShowSettings(!showSettings)} className={`p-2 ${themeValue.t.bgHover} rounded-full transition`}>{showSettings ? <X size={20} /> : <Settings size={20} />}</button>
+                    <button onClick={handleLogout} className={`p-2 ${themeValue.t.bgHover} rounded-full transition ml-1`}><LogOut size={20} /></button>
                   </div>
                 )}
               </header>
-
               <main className="flex-1 overflow-y-auto">
                 {showSettings ? (
-                  <SettingsView 
-                    onBack={() => setShowSettings(false)}
-                    storageMode={storageMode}
-                    authUser={authUser}
-                    displayName={displayName}
-                    activities={activities}
-                    db={db}
-                  />
+                  <SettingsView onBack={() => setShowSettings(false)} storageMode={storageMode} authUser={authUser} displayName={displayName} activities={activities} groups={groups} db={db} />
                 ) : !selectedActivity ? (
-                  <HomeView 
-                    activities={activities}
-                    newActivityName={newActivityName}
-                    setNewActivityName={setNewActivityName}
-                    onAddActivity={handleAddActivity}
-                    onAddRecord={handleAddRecord}
-                    onSelectActivity={setSelectedActivityId}
-                    onLoadDefaults={loadDefaultActivities}
-                  />
+                  <HomeView activities={activities} allGroups={allGroups} selectedGroupId={selectedGroupId} onSelectGroup={setSelectedGroupId} onAddGroup={handleAddGroup} onRenameGroup={handleRenameGroup} onDeleteGroup={handleDeleteGroup} newActivityName={newActivityName} setNewActivityName={setNewActivityName} onAddActivity={handleAddActivity} onAddRecord={handleAddRecord} onSelectActivity={setSelectedActivityId} onLoadDefaults={loadDefaultActivities} />
                 ) : (
-                  <DetailView 
-                    activity={selectedActivity}
-                    onBack={() => setSelectedActivityId(null)}
-                    onAddRecord={() => handleAddRecord(selectedActivity.id)}
-                    onRenameActivity={(newName) => handleRenameActivity(selectedActivity.id, newName)}
-                    onDeleteRecord={(recordStr) => handleDeleteRecord(selectedActivity.id, recordStr)}
-                    onClearRecords={(date) => handleClearRecords(selectedActivity.id, date)}
-                    onDeleteActivity={() => handleDeleteActivity(selectedActivity.id)}
-                  />
+                  <DetailView activity={selectedActivity} allGroups={allGroups} onBack={() => setSelectedActivityId(null)} onAddRecord={() => handleAddRecord(selectedActivity.id)} onMoveActivity={(newGroupId) => handleMoveActivity(selectedActivity.id, newGroupId)} onRenameActivity={(newName) => handleRenameActivity(selectedActivity.id, newName)} onDeleteRecord={(recordStr) => handleDeleteRecord(selectedActivity.id, recordStr)} onClearRecords={(date) => handleClearRecords(selectedActivity.id, date)} onDeleteActivity={() => handleDeleteActivity(selectedActivity.id)} />
                 )}
               </main>
             </div>
@@ -585,68 +546,79 @@
     // ==========================================
     // Home View Component
     // ==========================================
-    function HomeView({ activities, newActivityName, setNewActivityName, onAddActivity, onAddRecord, onSelectActivity, onLoadDefaults }) {
+    function HomeView({ activities, allGroups, selectedGroupId, onSelectGroup, onAddGroup, onRenameGroup, onDeleteGroup, newActivityName, setNewActivityName, onAddActivity, onAddRecord, onSelectActivity, onLoadDefaults }) {
       const { t } = useContext(AppThemeContext);
       const todayStr = new Date().toLocaleDateString('en-CA');
+      const [showAddGroupModal, setShowAddGroupModal] = useState(false);
+      const [editingGroup, setEditingGroup] = useState(null);
+      const visibleActivities = activities.filter(a => (a.groupId || 'default') === selectedGroupId);
 
       return (
-        <div className="p-4 flex flex-col h-full">
-          <form onSubmit={onAddActivity} className="flex gap-2 mb-6">
-            <input 
-              type="text" 
-              value={newActivityName}
-              onChange={(e) => setNewActivityName(e.target.value)}
-              placeholder="輸入新追蹤項目 (例: 喝水)" 
-              className={`flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 ${t.ring} text-lg shadow-sm`}
-            />
-            <button 
-              type="submit" 
-              disabled={!newActivityName.trim()}
-              className={`${t.bg} text-white rounded-lg px-4 py-3 ${t.bgDisabled} ${t.bgActive} transition flex items-center shadow-sm`}
-            >
-              <Plus size={24} />
-            </button>
-          </form>
-
-          <div className="flex-1 space-y-3">
-            {activities.map(activity => {
-              const todayCount = activity.records.filter(r => new Date(r).toLocaleDateString('en-CA') === todayStr).length;
-              return (
-              <div 
-                key={activity.id} 
-                onClick={() => onSelectActivity(activity.id)}
-                className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm hover:shadow-md transition cursor-pointer flex items-center justify-between group"
-              >
-                <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-gray-800">{activity.name}</h3>
-                  <p className="text-sm text-gray-500 mt-1">
-                    總計: <span className={`font-bold ${t.text}`}>{activity.records.length}</span> 次
-                    <span className="mx-2 text-gray-300">|</span>
-                    本日: <span className="font-bold text-green-600">{todayCount}</span> 次
-                  </p>
-                </div>
-                <button 
-                  onClick={(e) => onAddRecord(activity.id, e)}
-                  className={`ml-4 ${t.bgLight} ${t.textLight} ${t.bgLightHover} rounded-full h-12 w-12 flex items-center justify-center font-bold text-lg transition-colors shadow-sm active:scale-95`}
-                >
-                  +1
+        <div className="flex flex-col h-full bg-gray-50">
+          <div className="flex overflow-x-auto bg-white border-b border-gray-100 [&::-webkit-scrollbar]:hidden items-center shadow-sm px-2">
+            {allGroups.map(g => (
+              <div key={g.id} className="relative flex-shrink-0 flex items-center">
+                <button onClick={() => onSelectGroup(g.id)} className={`px-5 py-3 font-medium transition-colors flex items-center gap-2 ${selectedGroupId === g.id ? `${t.text} border-b-2 ${t.border}` : 'text-gray-500 border-b-2 border-transparent hover:text-gray-700'}`}>
+                  <span>{g.name}</span>
+                  {selectedGroupId === g.id && g.id !== 'default' && (
+                    <span onClick={(e) => { e.stopPropagation(); setEditingGroup(g); }} className="text-gray-400 hover:text-gray-600 p-1 bg-gray-50 rounded-full"><Edit2 size={14} /></span>
+                  )}
                 </button>
               </div>
-            )})}
-
-            {activities.length === 0 && (
-              <div className="text-center py-10 flex flex-col items-center">
-                <p className="text-gray-400 mb-4">目前沒有任何項目，請在上方新增！</p>
-                {onLoadDefaults && (
-                  <button 
-                    onClick={onLoadDefaults}
-                    className={`${t.bgLight} ${t.textLight} px-6 py-2 rounded-xl font-bold shadow-sm ${t.bgLightHover} transition`}
-                  >
-                    或點此載入預設項目
-                  </button>
-                )}
-              </div>
+            ))}
+            {allGroups.length < 31 && (
+              <button onClick={() => setShowAddGroupModal(true)} className="px-4 py-3 text-gray-400 hover:text-blue-500 flex-shrink-0 flex items-center gap-1 transition"><Plus size={16} /> <span className="text-sm font-medium">群組</span></button>
             )}
+          </div>
+          <div className="p-4 flex-1 overflow-y-auto">
+            <form onSubmit={onAddActivity} className="flex gap-2 mb-6">
+              <input type="text" value={newActivityName} onChange={(e) => setNewActivityName(e.target.value)} placeholder={`新增項目至「${allGroups.find(g=>g.id===selectedGroupId)?.name || ''}」`} className={`flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 ${t.ring} text-lg shadow-sm`} />
+              <button type="submit" disabled={!newActivityName.trim()} className={`${t.bg} text-white rounded-lg px-4 py-3 ${t.bgDisabled} ${t.bgActive} transition flex items-center shadow-sm`}><Plus size={24} /></button>
+            </form>
+            <div className="space-y-3">
+              {visibleActivities.map(activity => {
+                const todayCount = activity.records.filter(r => new Date(r).toLocaleDateString('en-CA') === todayStr).length;
+                return (
+                  <div key={activity.id} onClick={() => onSelectActivity(activity.id)} className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm hover:shadow-md transition cursor-pointer flex items-center justify-between group">
+                    <div className="flex-1">
+                      <h3 className="text-lg font-semibold text-gray-800">{activity.name}</h3>
+                      <p className="text-sm text-gray-500 mt-1">總計: <span className={`font-bold ${t.text}`}>{activity.records.length}</span> 次 <span className="mx-2 text-gray-300">|</span> 本日: <span className="font-bold text-green-600">{todayCount}</span> 次</p>
+                    </div>
+                    <button onClick={(e) => onAddRecord(activity.id, e)} className={`ml-4 ${t.bgLight} ${t.textLight} ${t.bgLightHover} rounded-full h-12 w-12 flex items-center justify-center font-bold text-lg transition-colors shadow-sm active:scale-95`}>+1</button>
+                  </div>
+                );
+              })}
+              {visibleActivities.length === 0 && (
+                <div className="text-center py-10 flex flex-col items-center">
+                  <p className="text-gray-400 mb-4">此群組目前沒有項目哦！</p>
+                  {selectedGroupId === 'default' && activities.length === 0 && (
+                    <button onClick={onLoadDefaults} className={`${t.bgLight} ${t.textLight} px-6 py-2 rounded-xl font-bold shadow-sm ${t.bgLightHover} transition`}>或點此載入預設項目</button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+          {showAddGroupModal && <GroupModal title="新增群組" initialName="" onSave={(name) => { onAddGroup(name); setShowAddGroupModal(false); }} onClose={() => setShowAddGroupModal(false)} />}
+          {editingGroup && <GroupModal title="編輯群組" initialName={editingGroup.name} isEdit={true} onSave={(name) => { onRenameGroup(editingGroup.id, name); setEditingGroup(null); }} onDelete={() => { onDeleteGroup(editingGroup.id); setEditingGroup(null); }} onClose={() => setEditingGroup(null)} />}
+        </div>
+      );
+    }
+
+    // ==========================================
+    // Group Modal Component
+    // ==========================================
+    function GroupModal({ title, initialName, isEdit, onSave, onDelete, onClose }) {
+      const { t } = useContext(AppThemeContext);
+      const [name, setName] = useState(initialName);
+      return (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            <h3 className="font-bold text-lg mb-4 text-gray-800">{title}</h3>
+            <input autoFocus value={name} onChange={e=>setName(e.target.value)} className={`w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 ${t.ring} mb-6`} placeholder="請輸入群組名稱" />
+            <div className="flex justify-between items-center">
+              {isEdit ? <button onClick={onDelete} className="text-red-500 font-medium flex items-center gap-1 hover:bg-red-50 px-3 py-2 rounded-lg transition"><Trash2 size={18}/> 刪除</button> : <div></div>}
+              <div className="flex gap-2"><button onClick={onClose} className="px-4 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl transition">取消</button><button onClick={()=>onSave(name)} disabled={!name.trim()} className={`px-4 py-2 text-white ${t.bg} ${t.bgHover} rounded-xl transition disabled:opacity-50`}>儲存</button></div>
+            </div>
           </div>
         </div>
       );
@@ -655,12 +627,10 @@
     // ==========================================
     // Detail & Calendar View Component
     // ==========================================
-    function DetailView({ activity, onBack, onAddRecord, onRenameActivity, onDeleteRecord, onClearRecords, onDeleteActivity }) {
+    function DetailView({ activity, allGroups, onBack, onAddRecord, onMoveActivity, onRenameActivity, onDeleteRecord, onClearRecords, onDeleteActivity }) {
       const { t } = useContext(AppThemeContext);
       const [currentMonth, setCurrentMonth] = useState(new Date());
-      const [selectedDateStr, setSelectedDateStr] = useState(
-        new Date().toLocaleDateString('en-CA') 
-      );
+      const [selectedDateStr, setSelectedDateStr] = useState(new Date().toLocaleDateString('en-CA'));
 
       const todayStr = new Date().toLocaleDateString('en-CA');
       const todayCount = activity.records.filter(r => new Date(r).toLocaleDateString('en-CA') === todayStr).length;
@@ -674,13 +644,11 @@
         const map = {};
         activity.records.forEach(r => {
           const dateObj = new Date(r);
-          const dateStr = dateObj.toLocaleDateString('en-CA');
-          if (!map[dateStr]) map[dateStr] = [];
-          map[dateStr].push({ dateObj, originalStr: r });
+          const dStr = dateObj.toLocaleDateString('en-CA');
+          if (!map[dStr]) map[dStr] = [];
+          map[dStr].push({ dateObj, originalStr: r });
         });
-        Object.keys(map).forEach(k => {
-          map[k].sort((a, b) => b.dateObj - a.dateObj);
-        });
+        Object.keys(map).forEach(k => map[k].sort((a, b) => b.dateObj - a.dateObj));
         return map;
       }, [activity.records]);
 
@@ -696,18 +664,13 @@
       return (
         <div className="flex flex-col h-full bg-gray-50 pb-8">
           <div className="bg-white px-4 py-3 flex items-center justify-between shadow-sm sticky top-0 z-10">
-            <button onClick={onBack} className="text-gray-600 hover:bg-gray-100 p-2 rounded-full transition">
-              <ChevronLeft size={24} />
-            </button>
+            <button onClick={onBack} className="text-gray-600 hover:bg-gray-100 p-2 rounded-full transition"><ChevronLeft size={24} /></button>
             <div className="flex-1 text-center font-bold text-sm text-gray-800 flex flex-col">
               <span>總計 {activity.records.length} 次</span>
               <span className="text-green-600">本日 {todayCount} 次</span>
             </div>
-            <button onClick={onAddRecord} className={`${t.text} ${t.hoverBgLight} p-2 rounded-full transition font-bold flex items-center gap-1`}>
-              <Plus size={20} /> 記一筆
-            </button>
+            <button onClick={onAddRecord} className={`${t.text} ${t.hoverBgLight} p-2 rounded-full transition font-bold flex items-center gap-1`}><Plus size={20} /> 記一筆</button>
           </div>
-
           <div className="p-4 space-y-6 flex-1 overflow-y-auto">
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
               <div className="flex justify-between items-center p-4 bg-gray-50 border-b border-gray-100">
@@ -715,77 +678,37 @@
                 <h2 className="font-bold text-lg">{year} 年 {month + 1} 月</h2>
                 <button onClick={handleNextMonth} className="p-1 hover:bg-gray-200 rounded-full"><ChevronRight size={20} /></button>
               </div>
-
               <div className="grid grid-cols-7 text-center text-xs font-semibold text-gray-500 py-2 bg-white">
                 <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
               </div>
-
               <div className="grid grid-cols-7 text-center bg-white pb-2">
                 {calendarDays.map((day, idx) => {
                   if (!day) return <div key={`empty-${idx}`} className="py-2"></div>;
-                  
                   const dateStr = new Date(year, month, day).toLocaleDateString('en-CA');
                   const hasRecord = !!recordsByDate[dateStr];
                   const isSelected = selectedDateStr === dateStr;
-                  const isToday = dateStr === new Date().toLocaleDateString('en-CA');
-
+                  const isToday = dateStr === todayStr;
                   return (
                     <div key={day} className="py-1 px-1 flex justify-center">
-                      <button 
-                        onClick={() => setSelectedDateStr(dateStr)}
-                        className={`w-10 h-10 rounded-full flex flex-col items-center justify-center relative transition-all
-                          ${isSelected ? `${t.bg} text-white shadow-md` : 'hover:bg-gray-100'}
-                          ${isToday && !isSelected ? `border ${t.border} ${t.text}` : ''}
-                          ${!isSelected && !isToday ? 'text-gray-700' : ''}
-                        `}
-                      >
+                      <button onClick={() => setSelectedDateStr(dateStr)} className={`w-10 h-10 rounded-full flex flex-col items-center justify-center relative transition-all ${isSelected ? `${t.bg} text-white shadow-md` : 'hover:bg-gray-100'} ${isToday && !isSelected ? `border ${t.border} ${t.text}` : ''} ${!isSelected && !isToday ? 'text-gray-700' : ''}`}>
                         <span className="text-sm">{day}</span>
-                        {hasRecord && (
-                          <span className={`w-1.5 h-1.5 rounded-full mt-0.5 ${isSelected ? 'bg-white' : t.calendarDot}`}></span>
-                        )}
+                        {hasRecord && <span className={`w-1.5 h-1.5 rounded-full mt-0.5 ${isSelected ? 'bg-white' : t.calendarDot}`}></span>}
                       </button>
                     </div>
                   );
                 })}
               </div>
             </div>
-
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-              <h3 className="font-bold flex items-center gap-2 text-gray-700 mb-4 border-b pb-2">
-                <CalendarIcon size={18} />
-                {selectedDateStr} 紀錄
-                <span className="ml-auto text-sm font-normal text-gray-500">
-                  共 {selectedDayRecords.length} 次
-                </span>
-              </h3>
-
-              {selectedDayRecords.length > 0 ? (
-                <ul className="space-y-3">
-                  {selectedDayRecords.map((recordItem, idx) => (
-                    <RecordItem 
-                      key={idx} 
-                      recordItem={recordItem} 
-                      onDelete={onDeleteRecord} 
-                    />
-                  ))}
-                </ul>
-              ) : (
-                <div className="text-center text-gray-400 py-6">這天沒有紀錄唷！</div>
-              )}
+              <h3 className="font-bold flex items-center gap-2 text-gray-700 mb-4 border-b pb-2"><CalendarIcon size={18} /> {selectedDateStr} 紀錄 <span className="ml-auto text-sm font-normal text-gray-500">共 {selectedDayRecords.length} 次</span></h3>
+              {selectedDayRecords.length > 0 ? <ul className="space-y-3">{selectedDayRecords.map((item, idx) => <RecordItem key={idx} recordItem={item} onDelete={onDeleteRecord} />)}</ul> : <div className="text-center text-gray-400 py-6">這天沒有紀錄唷！</div>}
             </div>
-
             <div className="pt-6 border-t border-gray-200">
               <h4 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-3 px-2">資料管理</h4>
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden divide-y divide-gray-100">
-                <div className="p-2 border-b border-gray-100">
-                  <RenameAction currentName={activity.name} onSave={onRenameActivity} />
-                </div>
-                <ClearButton label="清除一週前的紀錄" days={7} onClear={onClearRecords} />
-                <ClearButton label="清除一個月前的紀錄" days={30} onClear={onClearRecords} />
-                <ClearButton label="清除一年前的紀錄" days={365} onClear={onClearRecords} />
-                <div className="p-2">
-                  <ConfirmButton initLabel="刪除此追蹤項目" confirmLabel="確定刪除？(無法復原)" onClick={onDeleteActivity} isDanger={true} />
-                </div>
+                <div className="p-2 border-b border-gray-100"><div className="flex items-center justify-between py-2 px-2"><span className="text-gray-700 font-medium flex items-center gap-2"><Folder size={18} className="text-gray-400"/> 所屬群組</span><select value={activity.groupId || 'default'} onChange={(e) => onMoveActivity(e.target.value)} className={`border border-gray-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 ${t.ring} text-sm text-gray-700 max-w-[150px] truncate`}>{allGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select></div></div>
+                <div className="p-2 border-b border-gray-100"><RenameAction currentName={activity.name} onSave={onRenameActivity} /></div>
+                <ClearButton label="清除一週前的紀錄" days={7} onClear={onClearRecords} /><ClearButton label="清除一個月前的紀錄" days={30} onClear={onClearRecords} /><ClearButton label="清除一年前的紀錄" days={365} onClear={onClearRecords} /><div className="p-2"><ConfirmButton initLabel="刪除此追蹤項目" confirmLabel="確定刪除？(無法復原)" onClick={onDeleteActivity} isDanger={true} /></div>
               </div>
             </div>
           </div>
@@ -800,63 +723,20 @@
       const { t } = useContext(AppThemeContext);
       const [isEditing, setIsEditing] = useState(false);
       const [name, setName] = useState(currentName);
-
-      if (isEditing) {
-        return (
-          <div className="p-2 flex gap-2 w-full items-center">
-            <input 
-              type="text" 
-              value={name} 
-              onChange={e => setName(e.target.value)} 
-              className={`flex-1 border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 ${t.ring}`}
-              autoFocus
-            />
-            <button onClick={() => { setIsEditing(false); setName(currentName); }} className="p-2 text-gray-500 hover:bg-gray-200 rounded-lg transition"><X size={18} /></button>
-            <button onClick={() => { onSave(name); setIsEditing(false); }} className={`p-2 ${t.bg} text-white ${t.bgHover} rounded-lg transition`}><Check size={18} /></button>
-          </div>
-        );
-      }
-
-      return (
-        <button 
-          onClick={() => setIsEditing(true)}
-          className="w-full py-3 px-2 rounded-xl font-medium text-left transition flex items-center justify-between text-gray-700 hover:bg-gray-50"
-        >
-          <span className="px-2">重新命名此項目</span>
-          <Edit2 size={18} className="text-gray-400 mr-2" />
-        </button>
-      );
+      if (isEditing) return (<div className="p-2 flex gap-2 w-full items-center"><input type="text" value={name} onChange={e => setName(e.target.value)} className={`flex-1 border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 ${t.ring}`} autoFocus /><button onClick={() => { setIsEditing(false); setName(currentName); }} className="p-2 text-gray-500 hover:bg-gray-200 rounded-lg transition"><X size={18} /></button><button onClick={() => { onSave(name); setIsEditing(false); }} className={`p-2 ${t.bg} text-white ${t.bgHover} rounded-lg transition`}><Check size={18} /></button></div>);
+      return (<button onClick={() => setIsEditing(true)} className="w-full py-3 px-2 rounded-xl font-medium text-left transition flex items-center justify-between text-gray-700 hover:bg-gray-50"><span className="px-2">重新命名此項目</span><Edit2 size={18} className="text-gray-400 mr-2" /></button>);
     }
 
     // ==========================================
-    // Record Item Component (For deleting specific time)
+    // Record Item Component
     // ==========================================
     function RecordItem({ recordItem, onDelete }) {
       const { t } = useContext(AppThemeContext);
       const [confirming, setConfirming] = useState(false);
-      
       return (
         <li className="flex items-center justify-between bg-gray-50 p-3 rounded-lg text-gray-700">
-          <div className="flex items-center gap-3">
-            <Clock size={16} className={t.textIcon} />
-            <span className="font-medium text-lg">
-              {recordItem.dateObj.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
-            </span>
-          </div>
-          {confirming ? (
-            <div className="flex items-center gap-2">
-              <button onClick={() => setConfirming(false)} className="text-gray-500 text-sm px-2 py-1 hover:bg-gray-200 rounded transition">取消</button>
-              <button onClick={() => onDelete(recordItem.originalStr)} className="text-white text-sm bg-red-500 px-3 py-1 rounded shadow-sm hover:bg-red-600 transition">刪除</button>
-            </div>
-          ) : (
-            <button 
-              onClick={() => setConfirming(true)}
-              className="text-gray-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-full transition"
-              title="刪除此筆紀錄"
-            >
-              <Trash2 size={18} />
-            </button>
-          )}
+          <div className="flex items-center gap-3"><Clock size={16} className={t.textIcon} /><span className="font-medium text-lg">{recordItem.dateObj.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</span></div>
+          {confirming ? <div className="flex items-center gap-2"><button onClick={() => setConfirming(false)} className="text-gray-500 text-sm px-2 py-1 hover:bg-gray-200 rounded transition">取消</button><button onClick={() => onDelete(recordItem.originalStr)} className="text-white text-sm bg-red-500 px-3 py-1 rounded shadow-sm hover:bg-red-600 transition">刪除</button></div> : <button onClick={() => setConfirming(true)} className="text-gray-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-full transition"><Trash2 size={18} /></button>}
         </li>
       );
     }
@@ -864,52 +744,25 @@
     // ==========================================
     // Settings & Sync View Component
     // ==========================================
-    function SettingsView({ onBack, storageMode, authUser, displayName, activities, db }) {
+    function SettingsView({ onBack, storageMode, authUser, displayName, activities, groups, db }) {
       const { t, themeColor, headerText, setThemeColor, setHeaderText } = useContext(AppThemeContext);
       const [statusMsg, setStatusMsg] = useState('');
       const [isProcessing, setIsProcessing] = useState(false);
-
-      const TEXT_COLORS = [
-        { label: '純淨白', text: 'text-white', code: '#ffffff' },
-        { label: '深邃黑', text: 'text-gray-900', code: '#111827' },
-        { label: '暖陽黃', text: 'text-yellow-300', code: '#fde047' },
-        { label: '熱情紅', text: 'text-red-400', code: '#f87171' },
-        { label: '活力橘', text: 'text-orange-400', code: '#fb923c' },
-        { label: '天空藍', text: 'text-blue-300', code: '#93c5fd' }
-      ];
-
-      const showMessage = (msg) => {
-        setStatusMsg(msg);
-        setTimeout(() => setStatusMsg(''), 4000);
-      };
+      const TEXT_COLORS = [{ label: '純淨白', text: 'text-white', code: '#ffffff' }, { label: '深邃黑', text: 'text-gray-900', code: '#111827' }, { label: '暖陽黃', text: 'text-yellow-300', code: '#fde047' }, { label: '熱情紅', text: 'text-red-400', code: '#f87171' }, { label: '活力橘', text: 'text-orange-400', code: '#fb923c' }, { label: '天空藍', text: 'text-blue-300', code: '#93c5fd' }];
+      const showMessage = (msg) => { setStatusMsg(msg); setTimeout(() => setStatusMsg(''), 4000); };
 
       const handleLocalToCloud = async () => {
         setIsProcessing(true);
-        if (!authUser) {
-          showMessage('❌ 尚未登入。');
-          setIsProcessing(false);
-          return;
-        }
+        if (!authUser) { showMessage('❌ 尚未登入。'); setIsProcessing(false); return; }
         try {
-          const localData = JSON.parse(localStorage.getItem('activityTrackerData_local') || '[]');
-
-          // 清空目前雲端紀錄
-          for (const act of activities) {
-             await deleteDoc(doc(db, 'users', authUser.uid, 'activities', act.id));
-          }
-          // 寫入本機紀錄到雲端
-          for (const act of localData) {
-             await setDoc(doc(db, 'users', authUser.uid, 'activities', act.id), act);
-          }
+          const localActs = JSON.parse(localStorage.getItem('activityTrackerData_local') || '[]');
+          const localGrps = JSON.parse(localStorage.getItem('activityTrackerGroups_local') || '[]');
+          for (const act of activities) await deleteDoc(doc(db, 'users', authUser.uid, 'activities', act.id));
+          for (const g of groups) await deleteDoc(doc(db, 'users', authUser.uid, 'groups', g.id));
+          for (const act of localActs) await setDoc(doc(db, 'users', authUser.uid, 'activities', act.id), act);
+          for (const g of localGrps) await setDoc(doc(db, 'users', authUser.uid, 'groups', g.id), g);
           showMessage('✅ 已成功將「本機紀錄」上傳並覆蓋「雲端」！');
-        } catch (e) {
-          console.error(e);
-          if (e.code === 'permission-denied') {
-             showMessage('❌ 同步失敗：權限不足。請檢查 Firebase Rules。');
-          } else {
-             showMessage('❌ 同步失敗，請稍後再試。');
-          }
-        }
+        } catch (e) { showMessage('❌ 同步失敗。'); }
         setIsProcessing(false);
       };
 
@@ -917,203 +770,53 @@
         setIsProcessing(true);
         try {
           localStorage.setItem('activityTrackerData_local', JSON.stringify(activities));
+          localStorage.setItem('activityTrackerGroups_local', JSON.stringify(groups));
           showMessage('✅ 已成功將「雲端紀錄」下載並覆蓋「本機」！');
-        } catch (e) {
-          showMessage('❌ 同步失敗，請稍後再試。');
-        }
+        } catch (e) { showMessage('❌ 同步失敗。'); }
         setIsProcessing(false);
       };
 
       const handleDeleteCloud = async () => {
         setIsProcessing(true);
-        if (!authUser) {
-          showMessage('❌ 尚未登入。');
-          setIsProcessing(false);
-          return;
-        }
+        if (!authUser) { showMessage('❌ 尚未登入。'); setIsProcessing(false); return; }
         try {
-          for (const act of activities) {
-             await deleteDoc(doc(db, 'users', authUser.uid, 'activities', act.id));
-          }
+          for (const act of activities) await deleteDoc(doc(db, 'users', authUser.uid, 'activities', act.id));
+          for (const g of groups) await deleteDoc(doc(db, 'users', authUser.uid, 'groups', g.id));
           showMessage('✅ 已成功刪除所有雲端紀錄！');
-        } catch (e) {
-          console.error(e);
-          if (e.code === 'permission-denied') {
-             showMessage('❌ 刪除失敗：權限不足。');
-          } else {
-             showMessage('❌ 刪除失敗，請稍後再試。');
-          }
-        }
+        } catch (e) { showMessage('❌ 刪除失敗。'); }
         setIsProcessing(false);
       };
 
       return (
         <div className="flex flex-col h-full bg-gray-50 pb-8">
-          <div className="bg-white px-4 py-3 flex items-center shadow-sm sticky top-0 z-10">
-            <button onClick={onBack} className="text-gray-600 hover:bg-gray-100 p-2 rounded-full transition mr-2">
-              <ChevronLeft size={24} />
-            </button>
-            <h2 className="font-bold text-lg text-gray-800">資料同步與設定</h2>
-          </div>
-
+          <div className="bg-white px-4 py-3 flex items-center shadow-sm sticky top-0 z-10"><button onClick={onBack} className="text-gray-600 hover:bg-gray-100 p-2 rounded-full transition mr-2"><ChevronLeft size={24} /></button><h2 className="font-bold text-lg text-gray-800">資料同步與設定</h2></div>
           <div className="p-4 space-y-6 flex-1 overflow-y-auto">
-            {statusMsg && (
-              <div className={`${t.bgLight} ${t.textDark} p-3 rounded-xl text-center font-medium animate-pulse`}>
-                {statusMsg}
-              </div>
-            )}
-
+            {statusMsg && <div className={`${t.bgLight} ${t.textDark} p-3 rounded-xl text-center font-medium animate-pulse`}>{statusMsg}</div>}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-              <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2">
-                <Palette size={20} className={t.textIcon}/> 外觀設定
-              </h3>
-              
-              <div className="mb-5">
-                <p className="text-sm text-gray-600 mb-3">主題色彩：</p>
-                <div className="flex gap-4">
-                  {Object.entries(THEMES).map(([key, c]) => (
-                    <button 
-                      key={key}
-                      onClick={() => setThemeColor(key)}
-                      className={`w-10 h-10 rounded-full shadow-md border-2 transition-transform hover:scale-110 ${themeColor === key ? 'border-gray-800 scale-110' : 'border-transparent'}`}
-                      style={{ backgroundColor: c.code }}
-                      title={c.label}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <p className="text-sm text-gray-600 mb-3">標題文字顏色：</p>
-                <div className="flex gap-4">
-                  {TEXT_COLORS.map(c => (
-                    <button 
-                      key={c.text}
-                      onClick={() => setHeaderText(c.text)}
-                      className={`w-10 h-10 rounded-full shadow-md border-2 transition-transform hover:scale-110 flex items-center justify-center ${headerText === c.text ? 'border-gray-800 scale-110' : 'border-gray-200'}`}
-                      style={{ backgroundColor: c.code }}
-                      title={c.label}
-                    >
-                      <span className="text-xs font-bold" style={{ color: c.code === '#ffffff' ? '#000' : c.code }}>A</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Palette size={20} className={t.textIcon}/> 外觀設定</h3>
+              <div className="mb-5"><p className="text-sm text-gray-600 mb-3">主題色彩：</p><div className="flex gap-4">{Object.entries(THEMES).map(([key, c]) => <button key={key} onClick={() => setThemeColor(key)} className={`w-10 h-10 rounded-full shadow-md border-2 transition-transform hover:scale-110 ${themeColor === key ? 'border-gray-800 scale-110' : 'border-transparent'}`} style={{ backgroundColor: c.code }} />)}</div></div>
+              <div><p className="text-sm text-gray-600 mb-3">標題文字顏色：</p><div className="flex gap-4">{TEXT_COLORS.map(c => <button key={c.text} onClick={() => setHeaderText(c.text)} className={`w-10 h-10 rounded-full shadow-md border-2 transition-transform hover:scale-110 flex items-center justify-center ${headerText === c.text ? 'border-gray-800 scale-110' : 'border-gray-200'}`} style={{ backgroundColor: c.code }}><span className="text-xs font-bold" style={{ color: c.code === '#ffffff' ? '#000' : c.code }}>A</span></button>)}</div></div>
             </div>
-
-            {storageMode === 'cloud' ? (
-              <div className="space-y-6">
-                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-                   <h3 className="font-bold text-gray-700 mb-2 flex items-center gap-2">
-                     <Cloud size={20} className={t.textIcon}/> 雲端同步管理
-                   </h3>
-                   <p className="text-sm text-gray-500 mb-4">目前管理帳戶：<br/><span className={`font-bold ${t.text}`}>{displayName}</span></p>
-
-                   <div className="space-y-3 divide-y divide-gray-100">
-                     <div className="py-3">
-                       <p className="text-sm text-gray-600 mb-2">將暫存的本機資料，上傳並覆蓋此帳戶的雲端紀錄。</p>
-                       <ConfirmButton 
-                          initLabel="上傳：以「本機」覆蓋「雲端」" 
-                          confirmLabel="確定上傳並覆蓋？" 
-                          onClick={handleLocalToCloud}
-                          disabled={isProcessing}
-                       />
-                     </div>
-                     <div className="py-3">
-                       <p className="text-sm text-gray-600 mb-2">將此帳戶的雲端紀錄，下載並覆蓋到這台裝置的本機紀錄。</p>
-                       <ConfirmButton 
-                          initLabel="下載：以「雲端」覆蓋「本機」" 
-                          confirmLabel="確定下載並覆蓋？" 
-                          onClick={handleCloudToLocal}
-                          disabled={isProcessing}
-                       />
-                     </div>
-                     <div className="py-3">
-                       <p className="text-sm text-red-500 mb-2">永久清空此雲端帳戶的所有紀錄 (不影響本機)。</p>
-                       <ConfirmButton 
-                          initLabel="刪除所有雲端紀錄" 
-                          confirmLabel="確定永久刪除？" 
-                          onClick={handleDeleteCloud} 
-                          isDanger={true}
-                          disabled={isProcessing}
-                       />
-                     </div>
-                   </div>
-                </div>
-              </div>
-            ) : (
-              <div className="text-center py-10">
-                <Smartphone size={48} className="mx-auto text-gray-400 mb-4" />
-                <p className="text-gray-600 font-medium mb-2">您目前處於「本機模式」</p>
-                <p className="text-sm text-gray-500">請先登出並切換至「雲端同步」模式，即可管理該帳號的雲端同步與刪除操作。</p>
-              </div>
-            )}
+            {storageMode === 'cloud' ? <div className="space-y-6"><div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4"><h3 className="font-bold text-gray-700 mb-2 flex items-center gap-2"><Cloud size={20} className={t.textIcon}/> 雲端同步管理</h3><p className="text-sm text-gray-500 mb-4">目前帳戶：<span className={`font-bold ${t.text}`}>{displayName}</span></p><div className="space-y-3 divide-y divide-gray-100"><div className="py-3"><p className="text-sm text-gray-600 mb-2">將本機資料上傳並覆蓋雲端。</p><ConfirmButton initLabel="上傳：以「本機」覆蓋「雲端」" confirmLabel="確定上傳？" onClick={handleLocalToCloud} disabled={isProcessing} /></div><div className="py-3"><p className="text-sm text-gray-600 mb-2">將雲端紀錄下載並覆蓋到這台裝置。</p><ConfirmButton initLabel="下載：以「雲端」覆蓋「本機」" confirmLabel="確定下載？" onClick={handleCloudToLocal} disabled={isProcessing} /></div><div className="py-3"><p className="text-sm text-red-500 mb-2">永久清空雲端紀錄 (不影響本機)。</p><ConfirmButton initLabel="刪除所有雲端紀錄" confirmLabel="確定永久刪除？" onClick={handleDeleteCloud} isDanger={true} disabled={isProcessing} /></div></div></div></div> : <div className="text-center py-10"><Smartphone size={48} className="mx-auto text-gray-400 mb-4" /><p className="text-gray-600 font-medium mb-2">目前處於「本機模式」</p></div>}
           </div>
         </div>
       );
     }
 
-    // --- 輔助防呆按鈕元件 ---
     function ClearButton({ label, days, onClear }) {
-      const handleClear = () => {
-        const targetDate = new Date();
-        targetDate.setDate(targetDate.getDate() - days);
-        onClear(targetDate.toISOString());
-      };
-      return (
-        <div className="p-2">
-          <ConfirmButton initLabel={label} confirmLabel="確定清除？" onClick={handleClear} />
-        </div>
-      );
+      const handleClear = () => { const d = new Date(); d.setDate(d.getDate() - days); onClear(d.toISOString()); };
+      return (<div className="p-2"><ConfirmButton initLabel={label} confirmLabel="確定清除？" onClick={handleClear} /></div>);
     }
 
     function ConfirmButton({ initLabel, confirmLabel, onClick, isDanger = false, disabled = false }) {
       const { t } = useContext(AppThemeContext);
       const [confirming, setConfirming] = useState(false);
-
-      if (confirming) {
-        return (
-          <div className="flex gap-2 w-full">
-            <button 
-              disabled={disabled}
-              onClick={(e) => { e.stopPropagation(); setConfirming(false); }}
-              className={`flex-1 py-3 px-4 rounded-xl bg-gray-100 text-gray-700 font-medium flex justify-center items-center gap-1 transition ${disabled ? 'opacity-50 cursor-not-allowed' : 'active:bg-gray-200'}`}
-            >
-              <X size={18} /> 取消
-            </button>
-            <button 
-              disabled={disabled}
-              onClick={(e) => { e.stopPropagation(); onClick(); setConfirming(false); }}
-              className={`flex-1 py-3 px-4 rounded-xl font-medium flex justify-center items-center gap-1 text-white shadow-sm transition
-                ${isDanger ? 'bg-red-600' : t.bg}
-                ${disabled ? 'opacity-50 cursor-not-allowed' : (isDanger ? 'active:bg-red-700' : t.bgActive)}
-              `}
-            >
-              <Check size={18} /> {confirmLabel}
-            </button>
-          </div>
-        );
-      }
-
-      return (
-        <button 
-          disabled={disabled}
-          onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
-          className={`w-full py-3 px-4 rounded-xl font-medium text-left transition flex items-center justify-between
-            ${isDanger ? 'text-red-600' : 'text-gray-700'}
-            ${disabled ? 'opacity-50 cursor-not-allowed bg-gray-50' : (isDanger ? 'hover:bg-red-50' : 'hover:bg-gray-50')}
-          `}
-        >
-          <span className="px-2">{initLabel}</span>
-          {isDanger && <Trash2 size={18} className="mr-2" />}
-        </button>
-      );
+      if (confirming) return (<div className="flex gap-2 w-full"><button disabled={disabled} onClick={(e) => { e.stopPropagation(); setConfirming(false); }} className={`flex-1 py-3 px-4 rounded-xl bg-gray-100 text-gray-700 font-medium active:bg-gray-200`}>取消</button><button disabled={disabled} onClick={(e) => { e.stopPropagation(); onClick(); setConfirming(false); }} className={`flex-1 py-3 px-4 rounded-xl font-medium text-white shadow-sm ${isDanger ? 'bg-red-600 active:bg-red-700' : `${t.bg} ${t.bgActive}`}`}>確定</button></div>);
+      return (<button disabled={disabled} onClick={(e) => { e.stopPropagation(); setConfirming(true); }} className={`w-full py-3 px-4 rounded-xl font-medium text-left transition flex items-center justify-between ${isDanger ? 'text-red-600 hover:bg-red-50' : 'text-gray-700 hover:bg-gray-50'}`}><span className="px-2">{initLabel}</span>{isDanger && <Trash2 size={18} className="mr-2" />}</button>);
     }
 
-    // --- 7. 渲染至畫面 ---
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
-
   </script>
 </body>
 </html>
