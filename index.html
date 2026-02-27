@@ -280,7 +280,7 @@
         }
       }, [activities, groups, storageMode]);
 
-      // 提醒功能邏輯
+      // 提醒功能邏輯 - 使用 24 小時制比對
       useEffect(() => {
         const interval = setInterval(() => {
           const now = new Date();
@@ -720,7 +720,7 @@
                       onUpdateActivity({ reminderEnabled: isEnabled, reminder: activity.reminder || '08:00' });
                       if (isEnabled && Notification.permission !== 'granted') Notification.requestPermission();
                     }} />
-                    <div className={`w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all ${activity.reminderEnabled ? t.bg : ''}`}></div>
+                    <div className={`w-11 h-6 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all ${activity.reminderEnabled ? t.bg : 'bg-gray-200'}`}></div>
                   </label>
                 </div>
               </div>
