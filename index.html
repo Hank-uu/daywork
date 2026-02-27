@@ -214,9 +214,9 @@
     const generateId = () => Math.random().toString(36).substr(2, 9);
 
     const INITIAL_ACTIVITIES = [
-      { id: generateId(), name: '吃藥', records: [], groupId: 'default', target: 3 },
-      { id: generateId(), name: '清洗冷氣濾網', records: [], groupId: 'default', target: 1 },
-      { id: generateId(), name: '運動', records: [], groupId: 'default', target: 1 },
+      { id: generateId(), name: '吃藥', records: [], groupId: 'default', target: 0, targetType: 'daily' },
+      { id: generateId(), name: '清洗冷氣濾網', records: [], groupId: 'default', target: 0, targetType: 'monthly' },
+      { id: generateId(), name: '運動', records: [], groupId: 'default', target: 0, targetType: 'daily' },
     ];
 
     const THEMES = {
@@ -371,9 +371,34 @@
                     onSelectGroup={setSelectedGroupId} 
                     onAddActivity={async (name) => {
                       const id = generateId();
-                      const newItem = { id, name, records: [], groupId: selectedGroupId, target: 1 };
+                      const newItem = { id, name, records: [], groupId: selectedGroupId, target: 0, targetType: 'daily' };
                       if (storageMode === 'cloud') await setDoc(doc(db, 'users', authUser.uid, 'activities', id), newItem);
                       else setActivities([...activities, newItem]);
+                    }}
+                    onAddGroup={async (groupName) => {
+                      if (!groupName.trim() || allGroups.length >= 31) return;
+                      const newId = 'group_' + generateId();
+                      const newGroup = { id: newId, name: groupName.trim() };
+                      if (storageMode === 'cloud' && authUser) await setDoc(doc(db, 'users', authUser.uid, 'groups', newId), newGroup);
+                      else setGroups([...groups, newGroup]);
+                      setSelectedGroupId(newId);
+                    }}
+                    onRenameGroup={async (id, newName) => {
+                      if (id === 'default' || !newName.trim()) return;
+                      if (storageMode === 'cloud' && authUser) await updateDoc(doc(db, 'users', authUser.uid, 'groups', id), { name: newName.trim() });
+                      else setGroups(groups.map(g => g.id === id ? { ...g, name: newName.trim() } : g));
+                    }}
+                    onDeleteGroup={async (id) => {
+                      if (id === 'default') return;
+                      const actsToMove = activities.filter(a => a.groupId === id);
+                      if (storageMode === 'cloud' && authUser) {
+                        for (const act of actsToMove) await updateDoc(doc(db, 'users', authUser.uid, 'activities', act.id), { groupId: 'default' });
+                        await deleteDoc(doc(db, 'users', authUser.uid, 'groups', id));
+                      } else {
+                        setActivities(activities.map(a => a.groupId === id ? { ...a, groupId: 'default' } : a));
+                        setGroups(groups.filter(g => g.id !== id));
+                      }
+                      setSelectedGroupId('default');
                     }}
                     onAddRecord={(id) => setMemoTargetId(id)}
                     onSelectActivity={setSelectedActivityId}
@@ -393,6 +418,11 @@
                     onUpdateActivity={(data) => handleUpdateActivity(selectedActivity.id, data)}
                     onDeleteRecord={async (rStr) => {
                       const newRecords = selectedActivity.records.filter(r => (typeof r === 'string' ? r : r.timestamp) !== rStr);
+                      await handleUpdateActivity(selectedActivity.id, { records: newRecords });
+                    }}
+                    onClearRecords={async (days) => {
+                      const cutoffTime = new Date().getTime() - (days * 24 * 60 * 60 * 1000);
+                      const newRecords = selectedActivity.records.filter(r => new Date(typeof r === 'string' ? r : r.timestamp).getTime() >= cutoffTime);
                       await handleUpdateActivity(selectedActivity.id, { records: newRecords });
                     }}
                     onDeleteActivity={async () => {
@@ -416,10 +446,14 @@
       );
     }
 
-    function HomeView({ activities, allGroups, selectedGroupId, onSelectGroup, onAddActivity, onAddRecord, onSelectActivity, onLoadDefaults }) {
+    function HomeView({ activities, allGroups, selectedGroupId, onSelectGroup, onAddGroup, onRenameGroup, onDeleteGroup, onAddActivity, onAddRecord, onSelectActivity, onLoadDefaults }) {
       const { t } = useContext(AppThemeContext);
       const [newName, setNewName] = useState('');
+      const [showAddGroupModal, setShowAddGroupModal] = useState(false);
+      const [editingGroup, setEditingGroup] = useState(null);
       const todayStr = new Date().toLocaleDateString('en-CA');
+      const now = new Date();
+      
       const visible = activities.filter(a => (a.groupId || 'default') === selectedGroupId);
 
       const calculateStreak = (records) => {
@@ -435,12 +469,24 @@
         return streak;
       };
 
+      const targetLabels = { daily: '今日', monthly: '本月', yearly: '今年' };
+
       return (
         <div className="flex flex-col h-full bg-gray-50">
-          <div className="flex overflow-x-auto bg-white border-b border-gray-100 items-center shadow-sm px-2">
+          <div className="flex overflow-x-auto bg-white border-b border-gray-100 items-center shadow-sm px-2 [&::-webkit-scrollbar]:hidden">
             {allGroups.map(g => (
-              <button key={g.id} onClick={() => onSelectGroup(g.id)} className={`px-5 py-3 font-medium transition-colors ${selectedGroupId === g.id ? `${t.text} border-b-2 ${t.border}` : 'text-gray-500 hover:text-gray-700'}`}>{g.name}</button>
+              <div key={g.id} className="relative flex-shrink-0 flex items-center">
+                <button onClick={() => onSelectGroup(g.id)} className={`px-5 py-3 font-medium transition-colors flex items-center gap-2 ${selectedGroupId === g.id ? `${t.text} border-b-2 ${t.border}` : 'text-gray-500 hover:text-gray-700'}`}>
+                  <span>{g.name}</span>
+                  {selectedGroupId === g.id && g.id !== 'default' && (
+                    <span onClick={(e) => { e.stopPropagation(); setEditingGroup(g); }} className="text-gray-400 hover:text-gray-600 p-1 bg-gray-50 rounded-full" title="編輯或刪除群組"><Edit2 size={14} /></span>
+                  )}
+                </button>
+              </div>
             ))}
+            {allGroups.length < 31 && (
+              <button onClick={() => setShowAddGroupModal(true)} className="px-4 py-3 text-gray-400 hover:text-blue-500 flex-shrink-0 flex items-center gap-1 transition"><Plus size={16} /> <span className="text-sm font-medium">群組</span></button>
+            )}
           </div>
           <div className="p-4 flex-1 overflow-y-auto">
             <div className="flex gap-2 mb-6">
@@ -449,28 +495,68 @@
             </div>
             <div className="space-y-3">
               {visible.map(a => {
-                const todayRecs = a.records.filter(r => new Date(typeof r === 'string' ? r : r.timestamp).toLocaleDateString('en-CA') === todayStr);
-                const progress = Math.min(100, (todayRecs.length / (a.target || 1)) * 100);
+                const tType = a.targetType || 'daily';
+                const targetNum = a.target !== undefined ? a.target : 0;
+                
+                let currentCount = 0;
+                if (tType === 'monthly') {
+                  currentCount = a.records.filter(r => { const d = new Date(typeof r === 'string' ? r : r.timestamp); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); }).length;
+                } else if (tType === 'yearly') {
+                  currentCount = a.records.filter(r => new Date(typeof r === 'string' ? r : r.timestamp).getFullYear() === now.getFullYear()).length;
+                } else {
+                  currentCount = a.records.filter(r => new Date(typeof r === 'string' ? r : r.timestamp).toLocaleDateString('en-CA') === todayStr).length;
+                }
+
+                const progress = targetNum > 0 ? Math.min(100, (currentCount / targetNum) * 100) : 0;
                 const streak = calculateStreak(a.records);
+                
                 return (
                   <div key={a.id} onClick={() => onSelectActivity(a.id)} className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm hover:shadow-md transition cursor-pointer">
                     <div className="flex justify-between items-start mb-2">
                       <div>
                         <h3 className="text-lg font-bold text-gray-800">{a.name}</h3>
-                        <p className="text-xs text-gray-500">今日: {todayRecs.length} / 目標: {a.target || 1}</p>
+                        <p className="text-xs text-gray-500">{targetLabels[tType]}: <span className={currentCount >= targetNum && targetNum > 0 ? 'text-green-600 font-bold' : ''}>{currentCount}</span> {targetNum > 0 ? `/ 目標: ${targetNum}` : ''}</p>
                       </div>
                       <div className="flex items-center gap-2">
-                        {streak > 0 && <div className="flex items-center gap-1 text-orange-500 text-sm font-bold"><Flame size={16}/>{streak}</div>}
-                        <button onClick={(e) => { e.stopPropagation(); onAddRecord(a.id); }} className={`${t.bgLight} ${t.textLight} rounded-full h-10 w-10 flex items-center justify-center font-bold`}>+1</button>
+                        {streak > 0 && targetNum > 0 && <div className="flex items-center gap-1 text-orange-500 text-sm font-bold"><Flame size={16}/>{streak}</div>}
+                        <button onClick={(e) => { e.stopPropagation(); onAddRecord(a.id); }} className={`ml-2 ${t.bgLight} ${t.textLight} ${t.bgLightHover} rounded-full h-10 w-10 flex items-center justify-center font-bold text-lg transition-colors shadow-sm active:scale-95`}>+1</button>
                       </div>
                     </div>
-                    <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
-                      <div className={`${t.bg} h-full transition-all duration-500`} style={{ width: `${progress}%` }}></div>
-                    </div>
+                    {targetNum > 0 && (
+                      <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden mt-1">
+                        <div className={`${t.bg} h-full transition-all duration-500`} style={{ width: `${progress}%` }}></div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
-              {visible.length === 0 && <div className="text-center py-10 text-gray-400">這裡空空如也...</div>}
+              {visible.length === 0 && (
+                <div className="text-center py-10 flex flex-col items-center">
+                  <p className="text-gray-400 mb-4">此群組目前沒有項目哦！</p>
+                  {selectedGroupId === 'default' && activities.length === 0 && (
+                    <button onClick={onLoadDefaults} className={`${t.bgLight} ${t.textLight} px-6 py-2 rounded-xl font-bold shadow-sm ${t.bgLightHover} transition`}>或點此載入預設項目</button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+          {showAddGroupModal && <GroupModal title="新增群組" initialName="" onSave={(name) => { onAddGroup(name); setShowAddGroupModal(false); }} onClose={() => setShowAddGroupModal(false)} />}
+          {editingGroup && <GroupModal title="編輯群組" initialName={editingGroup.name} isEdit={true} onSave={(name) => { onRenameGroup(editingGroup.id, name); setEditingGroup(null); }} onDelete={() => { onDeleteGroup(editingGroup.id); setEditingGroup(null); }} onClose={() => setEditingGroup(null)} />}
+        </div>
+      );
+    }
+
+    function GroupModal({ title, initialName, isEdit, onSave, onDelete, onClose }) {
+      const { t } = useContext(AppThemeContext);
+      const [name, setName] = useState(initialName);
+      return (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl animate-in fade-in zoom-in duration-200">
+            <h3 className="font-bold text-lg mb-4 text-gray-800">{title}</h3>
+            <input autoFocus value={name} onChange={e=>setName(e.target.value)} className={`w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 ${t.ring} mb-6`} placeholder="請輸入群組名稱" />
+            <div className="flex justify-between items-center">
+              {isEdit ? <button onClick={onDelete} className="text-red-500 font-medium flex items-center gap-1 hover:bg-red-50 px-3 py-2 rounded-lg transition"><Trash2 size={18}/> 刪除</button> : <div></div>}
+              <div className="flex gap-2"><button onClick={onClose} className="px-4 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl transition">取消</button><button onClick={()=>onSave(name)} disabled={!name.trim()} className={`px-4 py-2 text-white ${t.bg} ${t.bgHover} rounded-xl transition disabled:opacity-50`}>儲存</button></div>
             </div>
           </div>
         </div>
@@ -482,23 +568,24 @@
       const [memo, setMemo] = useState('');
       return (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl animate-in fade-in zoom-in duration-200">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl animate-in fade-in zoom-in duration-200 relative">
             <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><StickyNote size={20} className={t.textIcon}/> 新增紀錄備註</h3>
             <textarea autoFocus value={memo} onChange={e=>setMemo(e.target.value)} className={`w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 ${t.ring} mb-6 h-24`} placeholder="選填：例如「飯後吃」、「剛運動完」" />
             <div className="flex gap-2">
               <button onClick={() => onSave('')} className="flex-1 px-4 py-2 text-gray-500 hover:bg-gray-100 rounded-xl transition">直接紀錄</button>
               <button onClick={() => onSave(memo)} className={`flex-1 px-4 py-2 text-white ${t.bg} rounded-xl shadow-md font-bold`}>儲存並紀錄</button>
             </div>
-            <button onClick={onClose} className="absolute top-4 right-4 text-gray-400"><X size={20}/></button>
+            <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X size={20}/></button>
           </div>
         </div>
       );
     }
 
-    function DetailView({ activity, allGroups, onBack, onAddRecord, onUpdateActivity, onDeleteRecord, onDeleteActivity }) {
+    function DetailView({ activity, allGroups, onBack, onAddRecord, onUpdateActivity, onDeleteRecord, onClearRecords, onDeleteActivity }) {
       const { t } = useContext(AppThemeContext);
       const [currentMonth, setCurrentMonth] = useState(new Date());
       const [selectedDateStr, setSelectedDateStr] = useState(new Date().toLocaleDateString('en-CA'));
+      const [editName, setEditName] = useState(activity.name);
 
       const recordsByDate = useMemo(() => {
         const map = {};
@@ -512,38 +599,50 @@
       }, [activity.records]);
 
       const selectedDayRecords = recordsByDate[selectedDateStr] || [];
+      const year = currentMonth.getFullYear();
+      const month = currentMonth.getMonth();
+      const firstDayOfMonth = new Date(year, month, 1).getDay();
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
 
       return (
         <div className="flex flex-col h-full bg-gray-50 pb-8">
           <div className="bg-white px-4 py-3 flex items-center justify-between shadow-sm sticky top-0 z-10">
-            <button onClick={onBack} className="p-2 text-gray-600 hover:bg-gray-100 rounded-full"><ChevronLeft size={24} /></button>
-            <div className="text-center">
-              <h2 className="font-bold text-gray-800">{activity.name}</h2>
-              <p className="text-xs text-gray-500">總計 {activity.records.length} 次</p>
+            <button onClick={onBack} className="p-2 text-gray-600 hover:bg-gray-100 rounded-full transition"><ChevronLeft size={24} /></button>
+            <div className="flex-1 text-center font-bold text-sm text-gray-800 flex flex-col">
+              <span className="text-lg">{activity.name}</span>
+              <span className="text-gray-500 font-normal">總計 {activity.records.length} 次紀錄</span>
             </div>
-            <button onClick={onAddRecord} className={`${t.text} p-2 font-bold`}>+ 記一筆</button>
+            <button onClick={onAddRecord} className={`${t.text} ${t.hoverBgLight} p-2 rounded-full transition font-bold flex items-center gap-1`}><Plus size={20} /> 記一筆</button>
           </div>
 
           <div className="p-4 space-y-6 overflow-y-auto">
             {/* 月曆組件 */}
             <div className="bg-white rounded-2xl p-4 shadow-sm">
-              <div className="flex justify-between mb-4">
-                <button onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1))}><ChevronLeft size={20}/></button>
-                <span className="font-bold">{currentMonth.getFullYear()}年 {currentMonth.getMonth() + 1}月</span>
-                <button onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))}><ChevronRight size={20}/></button>
+              <div className="flex justify-between mb-4 items-center">
+                <button onClick={() => setCurrentMonth(new Date(year, month - 1, 1))} className="p-1 hover:bg-gray-100 rounded-full"><ChevronLeft size={20}/></button>
+                <span className="font-bold text-gray-800">{year}年 {month + 1}月</span>
+                <button onClick={() => setCurrentMonth(new Date(year, month + 1, 1))} className="p-1 hover:bg-gray-100 rounded-full"><ChevronRight size={20}/></button>
               </div>
               <div className="grid grid-cols-7 gap-1 text-center">
-                {['日','一','二','三','四','五','六'].map(d=><div key={d} className="text-xs text-gray-400 py-1">{d}</div>)}
-                {Array.from({length: new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).getDay()}).map((_,i)=><div key={i}/>)}
-                {Array.from({length: new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate()}).map((_,i)=>{
+                {['日','一','二','三','四','五','六'].map(d=><div key={d} className="text-xs text-gray-400 py-1 font-medium">{d}</div>)}
+                {Array.from({length: firstDayOfMonth}).map((_,i)=><div key={`empty-${i}`}/>)}
+                {Array.from({length: daysInMonth}).map((_,i)=>{
                   const d = i + 1;
-                  const dStr = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), d).toLocaleDateString('en-CA');
-                  const has = recordsByDate[dStr];
+                  const dStr = new Date(year, month, d).toLocaleDateString('en-CA');
+                  const count = recordsByDate[dStr]?.length || 0;
                   const sel = selectedDateStr === dStr;
+                  const isToday = dStr === new Date().toLocaleDateString('en-CA');
                   return (
-                    <button key={i} onClick={()=>setSelectedDateStr(dStr)} className={`h-10 w-10 rounded-full flex flex-col items-center justify-center text-sm relative ${sel ? `${t.bg} text-white shadow-md` : 'hover:bg-gray-50'}`}>
-                      {d}{has && <div className={`w-1 h-1 rounded-full mt-0.5 ${sel ? 'bg-white' : t.calendarDot}`}></div>}
-                    </button>
+                    <div key={d} className="flex justify-center py-1">
+                      <button onClick={()=>setSelectedDateStr(dStr)} className={`relative h-10 w-10 rounded-full flex flex-col items-center justify-center text-sm font-medium transition-colors ${sel ? `${t.bg} text-white shadow-md` : (isToday ? `border border-gray-300 ${t.text}` : 'text-gray-700 hover:bg-gray-100')}`}>
+                        {d}
+                        {count > 0 && (
+                          <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full text-[10px] flex items-center justify-center font-bold ${sel ? 'bg-white '+t.text : `${t.bg} text-white`}`}>
+                            {count}
+                          </div>
+                        )}
+                      </button>
+                    </div>
                   );
                 })}
               </div>
@@ -551,74 +650,143 @@
 
             {/* 當日紀錄 */}
             <div className="bg-white rounded-2xl p-4 shadow-sm">
-              <h3 className="font-bold text-gray-700 border-b pb-2 mb-4">{selectedDateStr} 紀錄</h3>
+              <h3 className="font-bold text-gray-700 border-b border-gray-100 pb-2 mb-4 flex items-center justify-between">
+                <span className="flex items-center gap-2"><CalendarIcon size={18} className={t.textIcon}/> {selectedDateStr} 紀錄</span>
+                <span className="text-sm font-normal text-gray-500">共 {selectedDayRecords.length} 次</span>
+              </h3>
               <div className="space-y-3">
                 {selectedDayRecords.length > 0 ? selectedDayRecords.sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp)).map((r,i) => (
-                  <div key={i} className="flex justify-between items-center group">
-                    <div className="flex gap-3">
-                      <div className="text-lg font-mono">{new Date(r.timestamp).toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit', hour12:false})}</div>
-                      {r.memo && <div className="text-gray-500 text-sm bg-gray-100 px-2 py-0.5 rounded flex items-center gap-1"><StickyNote size={12}/>{r.memo}</div>}
+                  <div key={i} className="flex justify-between items-center group bg-gray-50 p-3 rounded-lg">
+                    <div className="flex gap-3 items-center">
+                      <Clock size={16} className={t.textIcon}/>
+                      <div className="text-lg font-mono font-medium text-gray-700">{new Date(r.timestamp).toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit', hour12:false})}</div>
+                      {r.memo && <div className="text-gray-500 text-sm bg-white border border-gray-200 px-2 py-0.5 rounded flex items-center gap-1 shadow-sm"><StickyNote size={12}/>{r.memo}</div>}
                     </div>
-                    <button onClick={() => onDeleteRecord(r.timestamp)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"><Trash2 size={16}/></button>
+                    <button onClick={() => onDeleteRecord(r.timestamp)} className="text-gray-400 hover:text-red-500 transition p-1 rounded-full hover:bg-red-50"><Trash2 size={16}/></button>
                   </div>
-                )) : <div className="text-center text-gray-400 py-4">無資料</div>}
+                )) : <div className="text-center text-gray-400 py-6">這天沒有紀錄唷！</div>}
               </div>
             </div>
 
             {/* 進階設定區 */}
-            <div className="bg-white rounded-2xl p-4 shadow-sm space-y-4">
-              <h4 className="font-bold text-sm text-gray-400 uppercase">項目設定</h4>
+            <div className="bg-white rounded-2xl p-4 shadow-sm space-y-5">
+              <h4 className="font-bold text-sm text-gray-400 uppercase tracking-wider mb-2">項目設定</h4>
+              
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 font-medium text-gray-700"><Target size={18} className="text-gray-400"/> 每日目標次數</div>
-                <input type="number" min="1" value={activity.target || 1} onChange={e=>onUpdateActivity({target: parseInt(e.target.value)||1})} className={`w-16 border rounded px-2 py-1 focus:ring-2 ${t.ring} outline-none text-center`} />
+                <div className="flex items-center gap-2 font-medium text-gray-700"><Edit2 size={18} className="text-gray-400"/> 項目名稱</div>
+                <div className="flex gap-1 items-center">
+                  <input type="text" value={editName} onChange={e=>setEditName(e.target.value)} className={`w-28 border border-gray-300 rounded px-2 py-1.5 focus:ring-2 ${t.ring} outline-none text-sm text-right`} />
+                  {editName !== activity.name && <button onClick={() => onUpdateActivity({name: editName.trim()})} className={`${t.bg} text-white px-3 py-1.5 rounded shadow-sm text-sm font-bold`}>儲存</button>}
+                </div>
               </div>
+
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 font-medium text-gray-700"><Bell size={18} className="text-gray-400"/> 定時提醒時間</div>
-                <input type="time" value={activity.reminder || ''} onChange={e=>onUpdateActivity({reminder: e.target.value})} className={`border rounded px-2 py-1 focus:ring-2 ${t.ring} outline-none`} />
+                <div className="flex items-center gap-2 font-medium text-gray-700"><Target size={18} className="text-gray-400"/> 目標設定</div>
+                <div className="flex gap-1 items-center">
+                  <select value={activity.targetType || 'daily'} onChange={e=>onUpdateActivity({targetType: e.target.value})} className={`border border-gray-300 rounded px-2 py-1.5 focus:ring-2 ${t.ring} outline-none text-sm bg-white`}>
+                    <option value="daily">每日</option>
+                    <option value="monthly">每月</option>
+                    <option value="yearly">每年</option>
+                  </select>
+                  <input type="number" min="0" placeholder="0" value={activity.target !== undefined ? activity.target : 0} onChange={e=>onUpdateActivity({target: parseInt(e.target.value)||0})} className={`w-16 border border-gray-300 rounded px-2 py-1.5 focus:ring-2 ${t.ring} outline-none text-center text-sm`} />
+                  <span className="text-sm text-gray-500">次</span>
+                </div>
               </div>
+
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 font-medium text-gray-700"><Bell size={18} className="text-gray-400"/> 定時提醒</div>
+                <div className="flex items-center gap-2">
+                  <input type="time" value={activity.reminder || ''} onChange={e=>onUpdateActivity({reminder: e.target.value})} className={`border border-gray-300 rounded px-2 py-1.5 focus:ring-2 ${t.ring} outline-none text-sm bg-white`} />
+                  {activity.reminder && <button onClick={()=>onUpdateActivity({reminder: ''})} className="text-gray-400 hover:text-red-500"><X size={16}/></button>}
+                </div>
+              </div>
+
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 font-medium text-gray-700"><Folder size={18} className="text-gray-400"/> 所屬群組</div>
-                <select value={activity.groupId || 'default'} onChange={e=>onUpdateActivity({groupId: e.target.value})} className="border rounded px-2 py-1 outline-none">
+                <select value={activity.groupId || 'default'} onChange={e=>onUpdateActivity({groupId: e.target.value})} className={`border border-gray-300 rounded px-2 py-1.5 outline-none text-sm bg-white max-w-[140px] truncate focus:ring-2 ${t.ring}`}>
                   {allGroups.map(g=><option key={g.id} value={g.id}>{g.name}</option>)}
                 </select>
               </div>
-              <div className="pt-4 border-t space-y-2">
-                <button onClick={onDeleteActivity} className="w-full py-3 text-red-500 font-bold hover:bg-red-50 rounded-xl transition flex items-center justify-center gap-2"><Trash2 size={18}/> 刪除此追蹤項目</button>
-              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden divide-y divide-gray-100">
+               <div className="p-2">
+                 <ConfirmButton initLabel="清除 30 日前的紀錄" confirmLabel="確定清除 30 天前資料？" onClick={() => onClearRecords(30)} />
+               </div>
+               <div className="p-2">
+                 <ConfirmButton initLabel="刪除此追蹤項目" confirmLabel="確定刪除？(無法復原)" onClick={onDeleteActivity} isDanger={true} />
+               </div>
             </div>
           </div>
         </div>
       );
     }
 
+    function ConfirmButton({ initLabel, confirmLabel, onClick, isDanger = false, disabled = false }) {
+      const { t } = useContext(AppThemeContext);
+      const [confirming, setConfirming] = useState(false);
+      if (confirming) return (<div className="flex gap-2 w-full"><button disabled={disabled} onClick={(e) => { e.stopPropagation(); setConfirming(false); }} className={`flex-1 py-3 px-4 rounded-xl bg-gray-100 text-gray-700 font-medium active:bg-gray-200 transition`}>取消</button><button disabled={disabled} onClick={(e) => { e.stopPropagation(); onClick(); setConfirming(false); }} className={`flex-1 py-3 px-4 rounded-xl font-medium text-white shadow-sm transition ${isDanger ? 'bg-red-600 active:bg-red-700' : `${t.bg} ${t.bgActive}`}`}>確定</button></div>);
+      return (<button disabled={disabled} onClick={(e) => { e.stopPropagation(); setConfirming(true); }} className={`w-full py-3 px-4 rounded-xl font-medium text-left transition flex items-center justify-between ${isDanger ? 'text-red-500 hover:bg-red-50' : 'text-gray-700 hover:bg-gray-50'}`}><span className="px-2">{initLabel}</span>{isDanger && <Trash2 size={18} className="mr-2" />}</button>);
+    }
+
     function SettingsView({ onBack, storageMode, authUser, displayName, activities, groups, db }) {
       const { t, themeColor, headerText, setThemeColor, setHeaderText } = useContext(AppThemeContext);
-      const colors = [{label:'純白',val:'text-white',c:'#fff'}, {label:'深黑',val:'text-gray-900',c:'#111'}, {label:'亮黃',val:'text-yellow-300',c:'#ff0'}];
+      const colors = [{label:'純白',val:'text-white',c:'#fff'}, {label:'深黑',val:'text-gray-900',c:'#111'}, {label:'亮黃',val:'text-yellow-300',c:'#ff0'}, {label:'熱情紅',val:'text-red-400',c:'#f87171'}, {label:'活力橘',val:'text-orange-400',c:'#fb923c'}, {label:'天空藍',val:'text-blue-300',c:'#93c5fd'}];
+      const [statusMsg, setStatusMsg] = useState('');
+      const [isProcessing, setIsProcessing] = useState(false);
+      const showMessage = (msg) => { setStatusMsg(msg); setTimeout(() => setStatusMsg(''), 4000); };
+
+      const handleLocalToCloud = async () => {
+        setIsProcessing(true);
+        if (!authUser) { showMessage('❌ 尚未登入。'); setIsProcessing(false); return; }
+        try {
+          const localActs = JSON.parse(localStorage.getItem('activityTrackerData_local') || '[]');
+          const localGrps = JSON.parse(localStorage.getItem('activityTrackerGroups_local') || '[]');
+          for (const act of activities) await deleteDoc(doc(db, 'users', authUser.uid, 'activities', act.id));
+          for (const g of groups) await deleteDoc(doc(db, 'users', authUser.uid, 'groups', g.id));
+          for (const act of localActs) await setDoc(doc(db, 'users', authUser.uid, 'activities', act.id), act);
+          for (const g of localGrps) await setDoc(doc(db, 'users', authUser.uid, 'groups', g.id), g);
+          showMessage('✅ 已成功將「本機紀錄」上傳並覆蓋「雲端」！');
+        } catch (e) { showMessage('❌ 同步失敗。'); }
+        setIsProcessing(false);
+      };
+
+      const handleCloudToLocal = async () => {
+        setIsProcessing(true);
+        try {
+          localStorage.setItem('activityTrackerData_local', JSON.stringify(activities));
+          localStorage.setItem('activityTrackerGroups_local', JSON.stringify(groups));
+          showMessage('✅ 已成功將「雲端紀錄」下載並覆蓋「本機」！');
+        } catch (e) { showMessage('❌ 同步失敗。'); }
+        setIsProcessing(false);
+      };
+
+      const handleDeleteCloud = async () => {
+        setIsProcessing(true);
+        if (!authUser) { showMessage('❌ 尚未登入。'); setIsProcessing(false); return; }
+        try {
+          for (const act of activities) await deleteDoc(doc(db, 'users', authUser.uid, 'activities', act.id));
+          for (const g of groups) await deleteDoc(doc(db, 'users', authUser.uid, 'groups', g.id));
+          showMessage('✅ 已成功刪除所有雲端紀錄！');
+        } catch (e) { showMessage('❌ 刪除失敗。'); }
+        setIsProcessing(false);
+      };
+
       return (
-        <div className="p-4 space-y-6">
-          <button onClick={onBack} className="flex items-center gap-1 text-gray-500"><ChevronLeft size={20}/> 返回</button>
-          <div className="bg-white rounded-2xl p-4 shadow-sm space-y-6">
-            <h3 className="font-bold text-lg flex items-center gap-2"><Palette size={20}/> 外觀設定</h3>
-            <div>
-              <p className="text-sm text-gray-500 mb-3">主題色彩：</p>
-              <div className="flex gap-4">
-                {Object.entries(THEMES).map(([k,v]) => <button key={k} onClick={()=>setThemeColor(k)} className={`w-10 h-10 rounded-full border-4 ${themeColor===k ? 'border-gray-800 shadow-lg' : 'border-transparent'}`} style={{backgroundColor:v.code}}></button>)}
-              </div>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500 mb-3">文字顏色：</p>
-              <div className="flex gap-4">
-                {colors.map(c => <button key={c.val} onClick={()=>setHeaderText(c.val)} className={`px-3 py-1 rounded-lg border-2 ${headerText===c.val ? 'border-gray-800' : 'border-gray-200'}`} style={{color:c.c==='#fff'?'#000':c.c}}>{c.label}</button>)}
-              </div>
-            </div>
+        <div className="flex flex-col h-full bg-gray-50 pb-8">
+          <div className="bg-white px-4 py-3 flex items-center shadow-sm sticky top-0 z-10">
+            <button onClick={onBack} className="text-gray-600 hover:bg-gray-100 p-2 rounded-full transition mr-2"><ChevronLeft size={24} /></button>
+            <h2 className="font-bold text-lg text-gray-800">資料同步與設定</h2>
           </div>
-          {storageMode === 'cloud' && (
-            <div className="bg-white rounded-2xl p-4 shadow-sm space-y-4">
-              <h3 className="font-bold text-lg flex items-center gap-2"><Cloud size={20}/> 雲端帳戶</h3>
-              <p className="text-sm text-blue-600 font-bold">{displayName}</p>
-              <p className="text-xs text-gray-400">您的紀錄會自動在不同裝置間同步。</p>
+          <div className="p-4 space-y-6 flex-1 overflow-y-auto">
+            {statusMsg && <div className={`${t.bgLight} ${t.textDark} p-3 rounded-xl text-center font-medium animate-pulse`}>{statusMsg}</div>}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
+              <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Palette size={20} className={t.textIcon}/> 外觀設定</h3>
+              <div className="mb-5"><p className="text-sm text-gray-600 mb-3">主題色彩：</p><div className="flex gap-4">{Object.entries(THEMES).map(([key, c]) => <button key={key} onClick={() => setThemeColor(key)} className={`w-10 h-10 rounded-full shadow-md border-2 transition-transform hover:scale-110 ${themeColor === key ? 'border-gray-800 scale-110' : 'border-transparent'}`} style={{ backgroundColor: c.code }} />)}</div></div>
+              <div><p className="text-sm text-gray-600 mb-3">標題文字顏色：</p><div className="flex flex-wrap gap-3">{colors.map(c => <button key={c.val} onClick={() => setHeaderText(c.val)} className={`px-3 py-1 rounded-lg border-2 font-bold text-sm transition-transform hover:scale-105 ${headerText === c.val ? 'border-gray-800 scale-105' : 'border-gray-200'}`} style={{ color: c.c === '#fff' ? '#000' : c.c, backgroundColor: c.c === '#fff' ? '#f3f4f6' : '#fff' }}>{c.label}</button>)}</div></div>
             </div>
-          )}
+            {storageMode === 'cloud' ? <div className="space-y-6"><div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4"><h3 className="font-bold text-gray-700 mb-2 flex items-center gap-2"><Cloud size={20} className={t.textIcon}/> 雲端同步管理</h3><p className="text-sm text-gray-500 mb-4">目前帳戶：<span className={`font-bold ${t.text}`}>{displayName}</span></p><div className="space-y-3 divide-y divide-gray-100"><div className="py-3"><p className="text-sm text-gray-600 mb-2">將本機資料上傳並覆蓋雲端。</p><ConfirmButton initLabel="上傳：以「本機」覆蓋「雲端」" confirmLabel="確定上傳？" onClick={handleLocalToCloud} disabled={isProcessing} /></div><div className="py-3"><p className="text-sm text-gray-600 mb-2">將雲端紀錄下載並覆蓋到這台裝置。</p><ConfirmButton initLabel="下載：以「雲端」覆蓋「本機」" confirmLabel="確定下載？" onClick={handleCloudToLocal} disabled={isProcessing} /></div><div className="py-3"><p className="text-sm text-red-500 mb-2">永久清空雲端紀錄 (不影響本機)。</p><ConfirmButton initLabel="刪除所有雲端紀錄" confirmLabel="確定永久刪除？" onClick={handleDeleteCloud} isDanger={true} disabled={isProcessing} /></div></div></div></div> : <div className="text-center py-10"><Smartphone size={48} className="mx-auto text-gray-400 mb-4" /><p className="text-gray-600 font-medium mb-2">目前處於「本機模式」</p></div>}
+          </div>
         </div>
       );
     }
