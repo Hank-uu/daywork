@@ -546,25 +546,29 @@
                   />
                 ) : !selectedActivityId ? (
                   <HomeView 
-                  onAddActivity={handleAddActivity}
-                  onAddRecord={handleAddRecord}
-                  onSelectActivity={setSelectedActivityId}
-                  onLoadDefaults={loadDefaultActivities}
-                />
-              ) : (
-                <DetailView 
-                  activity={selectedActivity}
-                  onBack={() => setSelectedActivityId(null)}
-                  onAddRecord={() => handleAddRecord(selectedActivity.id)}
-                  onRenameActivity={(newName) => handleRenameActivity(selectedActivity.id, newName)}
-                  onDeleteRecord={(recordStr) => handleDeleteRecord(selectedActivity.id, recordStr)}
-                  onClearRecords={(date) => handleClearRecords(selectedActivity.id, date)}
-                  onDeleteActivity={() => handleDeleteActivity(selectedActivity.id)}
-                />
-              )}
-            </main>
+                    activities={activities}
+                    newActivityName={newActivityName}
+                    setNewActivityName={setNewActivityName}
+                    onAddActivity={handleAddActivity}
+                    onAddRecord={handleAddRecord}
+                    onSelectActivity={setSelectedActivityId}
+                    onLoadDefaults={loadDefaultActivities}
+                  />
+                ) : (
+                  <DetailView 
+                    activity={selectedActivity}
+                    onBack={() => setSelectedActivityId(null)}
+                    onAddRecord={() => handleAddRecord(selectedActivity.id)}
+                    onRenameActivity={(newName) => handleRenameActivity(selectedActivity.id, newName)}
+                    onDeleteRecord={(recordStr) => handleDeleteRecord(selectedActivity.id, recordStr)}
+                    onClearRecords={(date) => handleClearRecords(selectedActivity.id, date)}
+                    onDeleteActivity={() => handleDeleteActivity(selectedActivity.id)}
+                  />
+                )}
+              </main>
+            </div>
           </div>
-        </div>
+        </AppThemeContext.Provider>
       );
     }
 
