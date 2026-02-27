@@ -44,6 +44,7 @@
     import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
     import { getFirestore, collection, doc, setDoc, deleteDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 
+    // 加入 createContext 與 useContext
     const { useState, useEffect, useMemo, createContext, useContext } = React;
 
     // --- 自訂 SVG 圖示 ---
@@ -214,9 +215,9 @@
     const generateId = () => Math.random().toString(36).substr(2, 9);
 
     const INITIAL_ACTIVITIES = [
-      { id: generateId(), name: '吃藥', records: [], groupId: 'default', target: 0, targetType: 'daily' },
-      { id: generateId(), name: '清洗冷氣濾網', records: [], groupId: 'default', target: 0, targetType: 'monthly' },
-      { id: generateId(), name: '運動', records: [], groupId: 'default', target: 0, targetType: 'daily' },
+      { id: generateId(), name: '吃藥', records: [], groupId: 'default', target: 0, targetType: 'daily', reminderEnabled: false },
+      { id: generateId(), name: '清洗冷氣濾網', records: [], groupId: 'default', target: 0, targetType: 'monthly', reminderEnabled: false },
+      { id: generateId(), name: '運動', records: [], groupId: 'default', target: 0, targetType: 'weekly', reminderEnabled: false },
     ];
 
     const THEMES = {
@@ -285,7 +286,7 @@
           const now = new Date();
           const currentTimeStr = now.getHours().toString().padStart(2, '0') + ":" + now.getMinutes().toString().padStart(2, '0');
           activities.forEach(act => {
-            if (act.reminder && act.reminder === currentTimeStr) {
+            if (act.reminderEnabled && act.reminder && act.reminder === currentTimeStr) {
               if (Notification.permission === 'granted') {
                 new Notification(`提醒：該執行「${act.name}」囉！`, { icon: './daywork.jpg' });
               }
@@ -371,7 +372,7 @@
                     onSelectGroup={setSelectedGroupId} 
                     onAddActivity={async (name) => {
                       const id = generateId();
-                      const newItem = { id, name, records: [], groupId: selectedGroupId, target: 0, targetType: 'daily' };
+                      const newItem = { id, name, records: [], groupId: selectedGroupId, target: 0, targetType: 'daily', reminderEnabled: false };
                       if (storageMode === 'cloud') await setDoc(doc(db, 'users', authUser.uid, 'activities', id), newItem);
                       else setActivities([...activities, newItem]);
                     }}
@@ -456,6 +457,17 @@
       
       const visible = activities.filter(a => (a.groupId || 'default') === selectedGroupId);
 
+      // 計算本週起始日 (以星期一為一週開始)
+      const getStartOfWeek = (date) => {
+        const d = new Date(date);
+        const day = d.getDay();
+        const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+        d.setDate(diff);
+        d.setHours(0,0,0,0);
+        return d;
+      };
+      const currentWeekStart = getStartOfWeek(now);
+
       const calculateStreak = (records) => {
         if (!records.length) return 0;
         const days = Array.from(new Set(records.map(r => new Date(typeof r === 'string' ? r : r.timestamp).toLocaleDateString('en-CA')))).sort().reverse();
@@ -469,7 +481,7 @@
         return streak;
       };
 
-      const targetLabels = { daily: '今日', monthly: '本月', yearly: '今年' };
+      const targetLabels = { daily: '今日', weekly: '本週', monthly: '本月', yearly: '今年' };
 
       return (
         <div className="flex flex-col h-full bg-gray-50">
@@ -499,7 +511,9 @@
                 const targetNum = a.target !== undefined ? a.target : 0;
                 
                 let currentCount = 0;
-                if (tType === 'monthly') {
+                if (tType === 'weekly') {
+                  currentCount = a.records.filter(r => new Date(typeof r === 'string' ? r : r.timestamp) >= currentWeekStart).length;
+                } else if (tType === 'monthly') {
                   currentCount = a.records.filter(r => { const d = new Date(typeof r === 'string' ? r : r.timestamp); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); }).length;
                 } else if (tType === 'yearly') {
                   currentCount = a.records.filter(r => new Date(typeof r === 'string' ? r : r.timestamp).getFullYear() === now.getFullYear()).length;
@@ -637,7 +651,7 @@
                       <button onClick={()=>setSelectedDateStr(dStr)} className={`relative h-10 w-10 rounded-full flex flex-col items-center justify-center text-sm font-medium transition-colors ${sel ? `${t.bg} text-white shadow-md` : (isToday ? `border border-gray-300 ${t.text}` : 'text-gray-700 hover:bg-gray-100')}`}>
                         {d}
                         {count > 0 && (
-                          <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full text-[10px] flex items-center justify-center font-bold ${sel ? 'bg-white '+t.text : `${t.bg} text-white`}`}>
+                          <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full text-[10px] flex items-center justify-center font-bold shadow-sm ${sel ? 'bg-white '+t.text : `${t.bg} text-white`}`}>
                             {count}
                           </div>
                         )}
@@ -685,6 +699,7 @@
                 <div className="flex gap-1 items-center">
                   <select value={activity.targetType || 'daily'} onChange={e=>onUpdateActivity({targetType: e.target.value})} className={`border border-gray-300 rounded px-2 py-1.5 focus:ring-2 ${t.ring} outline-none text-sm bg-white`}>
                     <option value="daily">每日</option>
+                    <option value="weekly">每週</option>
                     <option value="monthly">每月</option>
                     <option value="yearly">每年</option>
                   </select>
@@ -696,8 +711,17 @@
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 font-medium text-gray-700"><Bell size={18} className="text-gray-400"/> 定時提醒</div>
                 <div className="flex items-center gap-2">
-                  <input type="time" value={activity.reminder || ''} onChange={e=>onUpdateActivity({reminder: e.target.value})} className={`border border-gray-300 rounded px-2 py-1.5 focus:ring-2 ${t.ring} outline-none text-sm bg-white`} />
-                  {activity.reminder && <button onClick={()=>onUpdateActivity({reminder: ''})} className="text-gray-400 hover:text-red-500"><X size={16}/></button>}
+                  {activity.reminderEnabled && (
+                    <input type="time" value={activity.reminder || '08:00'} onChange={e=>onUpdateActivity({reminder: e.target.value})} className={`border border-gray-300 rounded px-2 py-1.5 focus:ring-2 ${t.ring} outline-none text-sm bg-white`} />
+                  )}
+                  <label className="relative inline-flex items-center cursor-pointer ml-1">
+                    <input type="checkbox" className="sr-only peer" checked={!!activity.reminderEnabled} onChange={e => {
+                      const isEnabled = e.target.checked;
+                      onUpdateActivity({ reminderEnabled: isEnabled, reminder: activity.reminder || '08:00' });
+                      if (isEnabled && Notification.permission !== 'granted') Notification.requestPermission();
+                    }} />
+                    <div className={`w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all ${activity.reminderEnabled ? t.bg : ''}`}></div>
+                  </label>
                 </div>
               </div>
 
