@@ -415,6 +415,9 @@
       };
 
       const handleDeleteActivity = async (id) => {
+        // 【修正核心】先將畫面退回首頁，再執行刪除動作，避免畫面讀取不到已刪除的資料而崩潰
+        setSelectedActivityId(null);
+        
         if (storageMode === 'cloud' && authUser) {
           try {
             await deleteDoc(doc(db, 'users', authUser.uid, 'activities', id));
@@ -422,7 +425,6 @@
         } else if (storageMode === 'local') {
           setActivities(prev => prev.filter(act => act.id !== id));
         }
-        setSelectedActivityId(null);
       };
 
       const handleDeleteRecord = async (id, recordStr) => {
@@ -529,7 +531,8 @@
                       : (storageMode === 'cloud' ? `${displayName} 的紀錄` : '本機紀錄')}
                   </h1>
                 </div>
-                {!selectedActivityId && (
+                {/* 【修正】將判斷從 !selectedActivityId 改成 !selectedActivity，即使資料從雲端被刪除也能自動退回首頁防呆 */}
+                {!selectedActivity && (
                   <div className="flex items-center ml-2">
                     <button onClick={() => setShowSettings(!showSettings)} className={`p-2 ${themeValue.t.bgHover} rounded-full transition`} title="設定與同步">
                       {showSettings ? <X size={20} /> : <Settings size={20} />}
@@ -551,7 +554,7 @@
                     activities={activities}
                     db={db}
                   />
-                ) : !selectedActivityId ? (
+                ) : !selectedActivity ? (
                   <HomeView 
                     activities={activities}
                     newActivityName={newActivityName}
