@@ -699,7 +699,7 @@
     // ==========================================
     // Settings & Sync View Component
     // ==========================================
-    function SettingsView({ onBack, storageMode, currentUser, activities, db, appId }) {
+    function SettingsView({ onBack, storageMode, authUser, displayName, activities, db, appId }) {
       const [statusMsg, setStatusMsg] = useState('');
       const [isProcessing, setIsProcessing] = useState(false);
 
@@ -710,23 +710,21 @@
 
       const handleLocalToCloud = async () => {
         setIsProcessing(true);
-        if (!isFirebaseConfigured) {
-          showMessage('❌ 尚未連結雲端資料庫。');
+        if (!isFirebaseConfigured || !authUser || authUser.isAnonymous) {
+          showMessage('❌ 尚未連結雲端資料庫或未登入。');
           setIsProcessing(false);
           return;
         }
         try {
           const localData = JSON.parse(localStorage.getItem('activityTrackerData_local') || '[]');
-          const safeUsername = currentUser.replace(/\//g, '_');
-          const colPath = `activities_${safeUsername}`;
 
           // 清空目前雲端紀錄
           for (const act of activities) {
-             await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', colPath, act.id));
+             await deleteDoc(doc(db, 'artifacts', appId, 'users', authUser.uid, 'activities', act.id));
           }
           // 寫入本機紀錄到雲端
           for (const act of localData) {
-             await setDoc(doc(db, 'artifacts', appId, 'public', 'data', colPath, act.id), act);
+             await setDoc(doc(db, 'artifacts', appId, 'users', authUser.uid, 'activities', act.id), act);
           }
           showMessage('✅ 已成功將「本機紀錄」上傳並覆蓋「雲端」！');
         } catch (e) {
@@ -748,16 +746,14 @@
 
       const handleDeleteCloud = async () => {
         setIsProcessing(true);
-        if (!isFirebaseConfigured) {
-          showMessage('❌ 尚未連結雲端資料庫。');
+        if (!isFirebaseConfigured || !authUser || authUser.isAnonymous) {
+          showMessage('❌ 尚未連結雲端資料庫或未登入。');
           setIsProcessing(false);
           return;
         }
         try {
-          const safeUsername = currentUser.replace(/\//g, '_');
-          const colPath = `activities_${safeUsername}`;
           for (const act of activities) {
-             await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', colPath, act.id));
+             await deleteDoc(doc(db, 'artifacts', appId, 'users', authUser.uid, 'activities', act.id));
           }
           showMessage('✅ 已成功刪除所有雲端紀錄！');
         } catch (e) {
@@ -788,7 +784,7 @@
                    <h3 className="font-bold text-gray-700 mb-2 flex items-center gap-2">
                      <Cloud size={20} className="text-blue-500"/> 雲端同步管理
                    </h3>
-                   <p className="text-sm text-gray-500 mb-4">目前管理帳戶：<span className="font-bold text-blue-600">{currentUser}</span></p>
+                   <p className="text-sm text-gray-500 mb-4">目前管理帳戶：<br/><span className="font-bold text-blue-600">{displayName}</span></p>
 
                    <div className="space-y-3 divide-y divide-gray-100">
                      <div className="py-3">
