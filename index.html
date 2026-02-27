@@ -244,7 +244,7 @@
         } catch (error) {
           console.error("Login Error:", error);
           if (error.code === 'auth/unauthorized-domain') {
-            alert("❌ 網域未授權！\n\n如果您是直接點開 html 檔案 (file:///)，Google 登入會被阻擋。\n\n解決方法：\n1. 請將網頁上傳到免費網頁主機 (如 GitHub Pages)。\n2. 或使用 VS Code 的 Live Server 套件開啟。");
+            alert(`❌ 網域未授權！\n\nFirebase 封鎖了來自目前網址的登入請求。\n\n解決方法：\n請至 Firebase 控制台 -> Authentication -> Settings (設定) -> Authorized domains (授權的網域)。\n點擊「新增網域」，然後輸入：\n${window.location.hostname}\n並儲存即可！`);
           } else if (error.code === 'auth/operation-not-allowed') {
              alert("❌ 尚未啟用 Google 登入！\n\n請至 Firebase 控制台 -> Authentication -> Sign-in method。\n新增提供者並「啟用 Google 登入」。");
           } else if (error.code === 'auth/configuration-not-found') {
