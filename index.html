@@ -28,20 +28,18 @@
 </head>
 <body class="bg-gray-100">
   
-  <!-- React 應用程式的掛載點 -->
   <div id="root"></div>
 
-  <!-- 5. 主程式碼 (type="text/babel" data-type="module" 支援 import 功能) -->
+  <!-- 5. 主程式碼 -->
   <script type="text/babel" data-type="module">
     // --- 引入 Firebase ---
     import { initializeApp } from 'firebase/app';
-    import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+    import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
     import { getFirestore, collection, doc, setDoc, deleteDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 
-    // --- 從全域變數提取 React Hooks ---
     const { useState, useEffect, useMemo } = React;
 
-    // --- 自訂 SVG 圖示 (取代外部 lucide-react 腳本以避免 CDN 載入順序錯誤) ---
+    // --- 自訂 SVG 圖示 ---
     const iconsMap = {
       Plus: (
         <React.Fragment>
@@ -141,25 +139,20 @@
     const Smartphone = (p) => <Icon name="Smartphone" {...p} />;
     const Settings = (p) => <Icon name="Settings" {...p} />;
 
-    // --- Firebase 設定 ---
-    let isFirebaseConfigured = false;
-    let firebaseConfig = { apiKey: "dummy", projectId: "dummy", appId: "dummy" };
-    if (typeof __firebase_config !== 'undefined') {
-      try {
-        const parsed = JSON.parse(__firebase_config);
-        if (parsed && Object.keys(parsed).length > 0) {
-          firebaseConfig = parsed;
-          isFirebaseConfigured = true;
-        }
-      } catch (e) {
-        console.error("Firebase config parse error", e);
-      }
-    }
+    // --- Firebase 設定 (您的專屬設定) ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyCnQEe7z0gvsdm3lTDZWus6scdSSD6ooEU",
+      authDomain: "mywork-26db5.firebaseapp.com",
+      projectId: "mywork-26db5",
+      storageBucket: "mywork-26db5.firebasestorage.app",
+      messagingSenderId: "168509668059",
+      appId: "1:168509668059:web:e80165656aabd430e02afe",
+      measurementId: "G-TFX7B1E9JK"
+    };
     
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = getFirestore(app);
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
     // --- 工具函式 ---
     const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -175,43 +168,38 @@
     // ==========================================
     function App() {
       const [authUser, setAuthUser] = useState(null);
-      const [usernameInput, setUsernameInput] = useState('');
       const [showSettings, setShowSettings] = useState(false);
       
       const [storageMode, setStorageMode] = useState(() => localStorage.getItem('tracker_storage_mode') || null);
-      const [currentUser, setCurrentUser] = useState(() => localStorage.getItem('tracker_username') || '');
       
       const [activities, setActivities] = useState([]);
       const [isLoading, setIsLoading] = useState(true);
       const [newActivityName, setNewActivityName] = useState('');
       const [selectedActivityId, setSelectedActivityId] = useState(null);
 
+      const displayName = authUser ? (authUser.displayName || authUser.email) : '本機使用者';
+
       useEffect(() => {
-        const initAuth = async () => {
-          try {
-            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-              await signInWithCustomToken(auth, __initial_auth_token);
-            } else {
-              await signInAnonymously(auth);
-            }
-          } catch (error) {
-            console.warn("Firebase 未設定或連線失敗，雲端模式可能無法使用。");
+        const unsubscribe = onAuthStateChanged(auth, (user) => {
+          setAuthUser(user);
+          // 如果使用者登出，但目前是雲端模式，則重置狀態
+          if (!user && storageMode === 'cloud') {
+            setStorageMode(null);
+            localStorage.removeItem('tracker_storage_mode');
           }
-        };
-        initAuth();
-        const unsubscribe = onAuthStateChanged(auth, setAuthUser);
+        });
         return () => unsubscribe();
-      }, []);
+      }, [storageMode]);
 
       useEffect(() => {
         if (storageMode === 'cloud') {
-          if (!authUser || !currentUser) {
+          if (!authUser) {
             setIsLoading(false);
             return;
           }
           setIsLoading(true);
-          const safeUsername = currentUser.replace(/\//g, '_');
-          const colRef = collection(db, 'artifacts', appId, 'public', 'data', `activities_${safeUsername}`);
+          // 雲端路徑：依據 Google 帳號的 UID 分開儲存
+          const colRef = collection(db, 'users', authUser.uid, 'activities');
           
           const unsubscribe = onSnapshot(colRef, (snapshot) => {
             const data = snapshot.docs.map(doc => doc.data());
@@ -221,6 +209,10 @@
           }, (error) => {
             console.error("Firestore error:", error);
             setIsLoading(false);
+            // 偵測權限錯誤
+            if (error.code === 'permission-denied') {
+              alert("❌ 資料庫權限不足！\n\n請至 Firebase 控制台 -> Firestore Database -> Rules (規則)。\n將規則修改為：\nallow read, write: if request.auth != null;");
+            }
           });
 
           return () => unsubscribe();
@@ -229,17 +221,13 @@
         if (storageMode === 'local') {
           const saved = localStorage.getItem('activityTrackerData_local') || localStorage.getItem('activityTrackerData');
           if (saved) {
-            try {
-              setActivities(JSON.parse(saved));
-            } catch (e) {
-              setActivities([]);
-            }
+            try { setActivities(JSON.parse(saved)); } catch (e) { setActivities([]); }
           } else {
             setActivities([]);
           }
           setIsLoading(false);
         }
-      }, [authUser, currentUser, storageMode]);
+      }, [authUser, storageMode]);
 
       useEffect(() => {
         if (storageMode === 'local') {
@@ -247,15 +235,23 @@
         }
       }, [activities, storageMode]);
 
-      const handleLoginCloud = (e) => {
-        e.preventDefault();
-        const name = usernameInput.trim();
-        if (name) {
-          setCurrentUser(name);
+      const handleLoginGoogle = async () => {
+        const provider = new GoogleAuthProvider();
+        try {
+          await signInWithPopup(auth, provider);
           setStorageMode('cloud');
-          localStorage.setItem('tracker_username', name);
           localStorage.setItem('tracker_storage_mode', 'cloud');
-          setUsernameInput('');
+        } catch (error) {
+          console.error("Login Error:", error);
+          if (error.code === 'auth/unauthorized-domain') {
+            alert("❌ 網域未授權！\n\n如果您是直接點開 html 檔案 (file:///)，Google 登入會被阻擋。\n\n解決方法：\n1. 請將網頁上傳到免費網頁主機 (如 GitHub Pages)。\n2. 或使用 VS Code 的 Live Server 套件開啟。");
+          } else if (error.code === 'auth/operation-not-allowed') {
+             alert("❌ 尚未啟用 Google 登入！\n\n請至 Firebase 控制台 -> Authentication -> Sign-in method。\n新增提供者並「啟用 Google 登入」。");
+          } else if (error.code === 'auth/configuration-not-found') {
+             alert("❌ 找不到 Google 登入設定！\n\n請前往 Firebase 控制台的「Authentication」->「Sign-in method」，確定您已經新增了「Google」提供者並點擊了儲存。");
+          } else {
+            alert("登入失敗：" + error.message);
+          }
         }
       };
 
@@ -264,31 +260,34 @@
         localStorage.setItem('tracker_storage_mode', 'local');
       };
 
-      const handleLogout = () => {
-        setCurrentUser('');
+      const handleLogout = async () => {
+        if (storageMode === 'cloud') {
+          await signOut(auth);
+        }
         setStorageMode(null);
-        localStorage.removeItem('tracker_username');
         localStorage.removeItem('tracker_storage_mode');
         setActivities([]);
         setSelectedActivityId(null);
       };
 
+      // 錯誤捕捉輔助函式
+      const handleCloudWriteError = (err) => {
+        console.error(err);
+        if (err.code === 'permission-denied') {
+          alert("❌ 寫入失敗：沒有權限！\n請檢查您的 Firestore Rules 是否允許登入者寫入資料。");
+        } else {
+          alert("❌ 雲端操作失敗：" + err.message);
+        }
+      };
+
       const loadDefaultActivities = async () => {
         setIsLoading(true);
-        if (storageMode === 'cloud' && currentUser) {
-          if (!isFirebaseConfigured) {
-             setIsLoading(false);
-             return;
-          }
+        if (storageMode === 'cloud' && authUser) {
           try {
-            const safeUsername = currentUser.replace(/\//g, '_');
             for (const act of INITIAL_ACTIVITIES) {
-              const docRef = doc(db, 'artifacts', appId, 'public', 'data', `activities_${safeUsername}`, act.id);
-              await setDoc(docRef, act);
+              await setDoc(doc(db, 'users', authUser.uid, 'activities', act.id), act);
             }
-          } catch (error) {
-            console.error("Error loading defaults:", error);
-          }
+          } catch (err) { handleCloudWriteError(err); }
         } else if (storageMode === 'local') {
           setActivities(INITIAL_ACTIVITIES);
         }
@@ -301,13 +300,10 @@
         const newId = generateId();
         const newActivity = { id: newId, name: newActivityName.trim(), records: [] };
 
-        if (storageMode === 'cloud' && currentUser) {
-          if (!isFirebaseConfigured) return;
+        if (storageMode === 'cloud' && authUser) {
           try {
-            const safeUsername = currentUser.replace(/\//g, '_');
-            const docRef = doc(db, 'artifacts', appId, 'public', 'data', `activities_${safeUsername}`, newId);
-            await setDoc(docRef, newActivity);
-          } catch (err) { console.error(err); }
+            await setDoc(doc(db, 'users', authUser.uid, 'activities', newId), newActivity);
+          } catch (err) { handleCloudWriteError(err); }
         } else if (storageMode === 'local') {
           setActivities(prev => [...prev, newActivity]);
         }
@@ -321,13 +317,10 @@
         if (!activity) return;
         const now = new Date().toISOString();
 
-        if (storageMode === 'cloud' && currentUser) {
-          if (!isFirebaseConfigured) return;
+        if (storageMode === 'cloud' && authUser) {
           try {
-            const safeUsername = currentUser.replace(/\//g, '_');
-            const docRef = doc(db, 'artifacts', appId, 'public', 'data', `activities_${safeUsername}`, id);
-            await updateDoc(docRef, { records: [...activity.records, now] });
-          } catch (err) {}
+            await updateDoc(doc(db, 'users', authUser.uid, 'activities', id), { records: [...activity.records, now] });
+          } catch (err) { handleCloudWriteError(err); }
         } else if (storageMode === 'local') {
           setActivities(prev => prev.map(act => 
             act.id === id ? { ...act, records: [...act.records, now] } : act
@@ -336,13 +329,10 @@
       };
 
       const handleDeleteActivity = async (id) => {
-        if (storageMode === 'cloud' && currentUser) {
-          if (!isFirebaseConfigured) return;
+        if (storageMode === 'cloud' && authUser) {
           try {
-            const safeUsername = currentUser.replace(/\//g, '_');
-            const docRef = doc(db, 'artifacts', appId, 'public', 'data', `activities_${safeUsername}`, id);
-            await deleteDoc(docRef);
-          } catch (err) {}
+            await deleteDoc(doc(db, 'users', authUser.uid, 'activities', id));
+          } catch (err) { handleCloudWriteError(err); }
         } else if (storageMode === 'local') {
           setActivities(prev => prev.filter(act => act.id !== id));
         }
@@ -356,13 +346,10 @@
         const cutoffTime = new Date(beforeDateStr).getTime();
         const filteredRecords = activity.records.filter(r => new Date(r).getTime() >= cutoffTime);
         
-        if (storageMode === 'cloud' && currentUser) {
-          if (!isFirebaseConfigured) return;
+        if (storageMode === 'cloud' && authUser) {
           try {
-            const safeUsername = currentUser.replace(/\//g, '_');
-            const docRef = doc(db, 'artifacts', appId, 'public', 'data', `activities_${safeUsername}`, id);
-            await updateDoc(docRef, { records: filteredRecords });
-          } catch (err) {}
+            await updateDoc(doc(db, 'users', authUser.uid, 'activities', id), { records: filteredRecords });
+          } catch (err) { handleCloudWriteError(err); }
         } else if (storageMode === 'local') {
           setActivities(prev => prev.map(act => 
             act.id === id ? { ...act, records: filteredRecords } : act
@@ -387,31 +374,13 @@
               <h1 className="text-2xl font-bold text-center text-gray-800 mb-2">紀錄小幫手</h1>
               <p className="text-center text-gray-500 mb-8 text-sm">請選擇您的使用方式</p>
               
-              {isFirebaseConfigured ? (
-                <form onSubmit={handleLoginCloud} className="space-y-4">
-                  <div>
-                    <input
-                      type="text"
-                      value={usernameInput}
-                      onChange={(e) => setUsernameInput(e.target.value)}
-                      placeholder="輸入名稱 (雲端同步使用)"
-                      className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition shadow-sm"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={!usernameInput.trim()}
-                    className="w-full bg-blue-600 text-white rounded-xl px-4 py-3 font-bold shadow-md hover:bg-blue-700 disabled:bg-blue-300 transition"
-                  >
-                    啟用雲端同步
-                  </button>
-                </form>
-              ) : (
-                <div className="bg-orange-50 border border-orange-200 text-orange-800 p-4 rounded-xl text-sm mb-4">
-                  <p className="font-bold flex items-center gap-1 mb-1">⚠️ 雲端功能未啟用</p>
-                  <p>因為您是在本機直接開啟此檔案，沒有連結到資料庫，因此僅能使用「本機模式」哦！</p>
-                </div>
-              )}
+              <button
+                onClick={handleLoginGoogle}
+                className="w-full bg-blue-600 text-white rounded-xl px-4 py-4 font-bold shadow-md hover:bg-blue-700 transition flex items-center justify-center gap-2"
+              >
+                <User size={20} />
+                以 Google 帳號登入 (雲端同步)
+              </button>
 
               <div className="relative flex py-6 items-center">
                 <div className="flex-grow border-t border-gray-200"></div>
@@ -449,7 +418,7 @@
                 <h1 className="text-xl font-bold truncate">
                   {selectedActivity 
                     ? selectedActivity.name 
-                    : (storageMode === 'cloud' ? `${currentUser} 的雲端紀錄` : '本機紀錄')}
+                    : (storageMode === 'cloud' ? `${displayName} 的紀錄` : '本機紀錄')}
                 </h1>
               </div>
               {!selectedActivityId && (
@@ -469,10 +438,10 @@
                 <SettingsView 
                   onBack={() => setShowSettings(false)}
                   storageMode={storageMode}
-                  currentUser={currentUser}
+                  authUser={authUser}
+                  displayName={displayName}
                   activities={activities}
                   db={db}
-                  appId={appId}
                 />
               ) : !selectedActivityId ? (
                 <HomeView 
@@ -699,7 +668,7 @@
     // ==========================================
     // Settings & Sync View Component
     // ==========================================
-    function SettingsView({ onBack, storageMode, authUser, displayName, activities, db, appId }) {
+    function SettingsView({ onBack, storageMode, authUser, displayName, activities, db }) {
       const [statusMsg, setStatusMsg] = useState('');
       const [isProcessing, setIsProcessing] = useState(false);
 
@@ -710,8 +679,8 @@
 
       const handleLocalToCloud = async () => {
         setIsProcessing(true);
-        if (!isFirebaseConfigured || !authUser || authUser.isAnonymous) {
-          showMessage('❌ 尚未連結雲端資料庫或未登入。');
+        if (!authUser) {
+          showMessage('❌ 尚未登入。');
           setIsProcessing(false);
           return;
         }
@@ -720,15 +689,20 @@
 
           // 清空目前雲端紀錄
           for (const act of activities) {
-             await deleteDoc(doc(db, 'artifacts', appId, 'users', authUser.uid, 'activities', act.id));
+             await deleteDoc(doc(db, 'users', authUser.uid, 'activities', act.id));
           }
           // 寫入本機紀錄到雲端
           for (const act of localData) {
-             await setDoc(doc(db, 'artifacts', appId, 'users', authUser.uid, 'activities', act.id), act);
+             await setDoc(doc(db, 'users', authUser.uid, 'activities', act.id), act);
           }
           showMessage('✅ 已成功將「本機紀錄」上傳並覆蓋「雲端」！');
         } catch (e) {
-          showMessage('❌ 同步失敗，請稍後再試。');
+          console.error(e);
+          if (e.code === 'permission-denied') {
+             showMessage('❌ 同步失敗：權限不足。請檢查 Firebase Rules。');
+          } else {
+             showMessage('❌ 同步失敗，請稍後再試。');
+          }
         }
         setIsProcessing(false);
       };
@@ -746,18 +720,23 @@
 
       const handleDeleteCloud = async () => {
         setIsProcessing(true);
-        if (!isFirebaseConfigured || !authUser || authUser.isAnonymous) {
-          showMessage('❌ 尚未連結雲端資料庫或未登入。');
+        if (!authUser) {
+          showMessage('❌ 尚未登入。');
           setIsProcessing(false);
           return;
         }
         try {
           for (const act of activities) {
-             await deleteDoc(doc(db, 'artifacts', appId, 'users', authUser.uid, 'activities', act.id));
+             await deleteDoc(doc(db, 'users', authUser.uid, 'activities', act.id));
           }
           showMessage('✅ 已成功刪除所有雲端紀錄！');
         } catch (e) {
-          showMessage('❌ 刪除失敗，請稍後再試。');
+          console.error(e);
+          if (e.code === 'permission-denied') {
+             showMessage('❌ 刪除失敗：權限不足。');
+          } else {
+             showMessage('❌ 刪除失敗，請稍後再試。');
+          }
         }
         setIsProcessing(false);
       };
