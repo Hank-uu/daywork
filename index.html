@@ -37,7 +37,8 @@
     import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
     import { getFirestore, collection, doc, setDoc, deleteDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 
-    const { useState, useEffect, useMemo } = React;
+    // 加入 createContext 與 useContext
+    const { useState, useEffect, useMemo, createContext, useContext } = React;
 
     // --- 自訂 SVG 圖示 ---
     const iconsMap = {
@@ -179,6 +180,40 @@
       { id: generateId(), name: '運動', records: [] },
     ];
 
+    // --- 主題設定 (Themes) ---
+    const THEMES = {
+      blue: {
+        label: '經典藍', code: '#2563eb',
+        bg: 'bg-blue-600', bgHover: 'hover:bg-blue-700', bgActive: 'active:bg-blue-700', bgDisabled: 'disabled:bg-blue-300',
+        ring: 'focus:ring-blue-500', text: 'text-blue-600', textIcon: 'text-blue-500',
+        bgLight: 'bg-blue-100', bgLightHover: 'hover:bg-blue-200', textLight: 'text-blue-700', textDark: 'text-blue-800',
+        border: 'border-blue-600', calendarDot: 'bg-blue-500', hoverBgLight: 'hover:bg-blue-50'
+      },
+      pink: {
+        label: '櫻花粉', code: '#ec4899',
+        bg: 'bg-pink-600', bgHover: 'hover:bg-pink-700', bgActive: 'active:bg-pink-700', bgDisabled: 'disabled:bg-pink-300',
+        ring: 'focus:ring-pink-500', text: 'text-pink-600', textIcon: 'text-pink-500',
+        bgLight: 'bg-pink-100', bgLightHover: 'hover:bg-pink-200', textLight: 'text-pink-700', textDark: 'text-pink-800',
+        border: 'border-pink-600', calendarDot: 'bg-pink-500', hoverBgLight: 'hover:bg-pink-50'
+      },
+      purple: {
+        label: '夢幻紫', code: '#9333ea',
+        bg: 'bg-purple-600', bgHover: 'hover:bg-purple-700', bgActive: 'active:bg-purple-700', bgDisabled: 'disabled:bg-purple-300',
+        ring: 'focus:ring-purple-500', text: 'text-purple-600', textIcon: 'text-purple-500',
+        bgLight: 'bg-purple-100', bgLightHover: 'hover:bg-purple-200', textLight: 'text-purple-700', textDark: 'text-purple-800',
+        border: 'border-purple-600', calendarDot: 'bg-purple-500', hoverBgLight: 'hover:bg-purple-50'
+      },
+      green: {
+        label: '自然綠', code: '#16a34a',
+        bg: 'bg-green-600', bgHover: 'hover:bg-green-700', bgActive: 'active:bg-green-700', bgDisabled: 'disabled:bg-green-300',
+        ring: 'focus:ring-green-500', text: 'text-green-600', textIcon: 'text-green-500',
+        bgLight: 'bg-green-100', bgLightHover: 'hover:bg-green-200', textLight: 'text-green-700', textDark: 'text-green-800',
+        border: 'border-green-600', calendarDot: 'bg-green-500', hoverBgLight: 'hover:bg-green-50'
+      }
+    };
+
+    const AppThemeContext = createContext();
+
     // ==========================================
     // Main App Component
     // ==========================================
@@ -188,10 +223,8 @@
       
       const [storageMode, setStorageMode] = useState(() => localStorage.getItem('tracker_storage_mode') || null);
       
-      const [theme, setTheme] = useState(() => {
-        const saved = localStorage.getItem('tracker_theme');
-        return saved ? JSON.parse(saved) : { bg: 'bg-blue-600', text: 'text-white' };
-      });
+      const [themeColor, setThemeColor] = useState(() => localStorage.getItem('tracker_theme_color') || 'blue');
+      const [headerText, setHeaderText] = useState(() => localStorage.getItem('tracker_header_text') || 'text-white');
       
       const [activities, setActivities] = useState([]);
       const [isLoading, setIsLoading] = useState(true);
@@ -257,8 +290,13 @@
       }, [activities, storageMode]);
 
       useEffect(() => {
-        localStorage.setItem('tracker_theme', JSON.stringify(theme));
-      }, [theme]);
+        localStorage.setItem('tracker_theme_color', themeColor);
+        localStorage.setItem('tracker_header_text', headerText);
+      }, [themeColor, headerText]);
+
+      const themeValue = useMemo(() => ({
+        themeColor, t: THEMES[themeColor] || THEMES.blue, headerText, setThemeColor, setHeaderText
+      }), [themeColor, headerText]);
 
       const handleLoginGoogle = async () => {
         const provider = new GoogleAuthProvider();
@@ -419,95 +457,95 @@
 
       if (!storageMode) {
         return (
-          <div className="min-h-screen bg-gray-100 flex items-center justify-center font-sans p-4">
-            <div className="bg-white p-8 rounded-2xl shadow-xl max-w-sm w-full">
-              <div className="flex justify-center gap-4 mb-6">
-                <div className="bg-blue-100 p-4 rounded-full text-blue-600">
-                  <Cloud size={32} />
+          <AppThemeContext.Provider value={themeValue}>
+            <div className="min-h-screen bg-gray-100 flex items-center justify-center font-sans p-4">
+              <div className="bg-white p-8 rounded-2xl shadow-xl max-w-sm w-full">
+                <div className="flex justify-center gap-4 mb-6">
+                  <div className={`${themeValue.t.bgLight} p-4 rounded-full ${themeValue.t.text}`}>
+                    <Cloud size={32} />
+                  </div>
+                  <div className="bg-gray-100 p-4 rounded-full text-gray-600">
+                    <Smartphone size={32} />
+                  </div>
                 </div>
-                <div className="bg-gray-100 p-4 rounded-full text-gray-600">
-                  <Smartphone size={32} />
+                <h1 className="text-2xl font-bold text-center text-gray-800 mb-2">紀錄小幫手</h1>
+                <p className="text-center text-gray-500 mb-8 text-sm">請選擇您的使用方式</p>
+                
+                <button
+                  onClick={handleLoginGoogle}
+                  className={`w-full ${themeValue.t.bg} text-white rounded-xl px-4 py-4 font-bold shadow-md ${themeValue.t.bgHover} transition flex items-center justify-center gap-2`}
+                >
+                  <User size={20} />
+                  以 Google 帳號登入 (雲端同步)
+                </button>
+
+                <div className="relative flex py-6 items-center">
+                  <div className="flex-grow border-t border-gray-200"></div>
+                  <span className="flex-shrink-0 mx-4 text-gray-400 text-sm">或</span>
+                  <div className="flex-grow border-t border-gray-200"></div>
                 </div>
-              </div>
-              <h1 className="text-2xl font-bold text-center text-gray-800 mb-2">紀錄小幫手</h1>
-              <p className="text-center text-gray-500 mb-8 text-sm">請選擇您的使用方式</p>
-              
-              <button
-                onClick={handleLoginGoogle}
-                className="w-full bg-blue-600 text-white rounded-xl px-4 py-4 font-bold shadow-md hover:bg-blue-700 transition flex items-center justify-center gap-2"
-              >
-                <User size={20} />
-                以 Google 帳號登入 (雲端同步)
-              </button>
 
-              <div className="relative flex py-6 items-center">
-                <div className="flex-grow border-t border-gray-200"></div>
-                <span className="flex-shrink-0 mx-4 text-gray-400 text-sm">或</span>
-                <div className="flex-grow border-t border-gray-200"></div>
+                <button
+                  onClick={handleLoginLocal}
+                  className="w-full bg-gray-100 text-gray-700 rounded-xl px-4 py-3 font-bold shadow-sm hover:bg-gray-200 transition flex items-center justify-center gap-2"
+                >
+                  <Smartphone size={20} />
+                  僅在本機使用 (免網路)
+                </button>
               </div>
-
-              <button
-                onClick={handleLoginLocal}
-                className="w-full bg-gray-100 text-gray-700 rounded-xl px-4 py-3 font-bold shadow-sm hover:bg-gray-200 transition flex items-center justify-center gap-2"
-              >
-                <Smartphone size={20} />
-                僅在本機使用 (免網路)
-              </button>
             </div>
-          </div>
+          </AppThemeContext.Provider>
         );
       }
 
       if (isLoading && activities.length === 0) {
         return (
-          <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent"></div>
-          </div>
+          <AppThemeContext.Provider value={themeValue}>
+            <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+              <div className={`animate-spin rounded-full h-12 w-12 border-4 ${themeValue.t.border} border-t-transparent`}></div>
+            </div>
+          </AppThemeContext.Provider>
         );
       }
 
       return (
-        <div className="min-h-screen bg-gray-100 font-sans text-gray-800">
-          <div className="max-w-md mx-auto bg-white min-h-screen shadow-lg flex flex-col relative overflow-hidden">
-            
-            <header className={`${theme.bg} ${theme.text} p-4 shadow-md z-10 flex items-center justify-between transition-colors duration-300`}>
-              <div className="flex items-center gap-2 flex-1 overflow-hidden">
-                {storageMode === 'cloud' ? <Cloud size={20} /> : <Smartphone size={20} />}
-                <h1 className="text-xl font-bold truncate">
-                  {selectedActivity 
-                    ? selectedActivity.name 
-                    : (storageMode === 'cloud' ? `${displayName} 的紀錄` : '本機紀錄')}
-                </h1>
-              </div>
-              {!selectedActivityId && (
-                <div className="flex items-center ml-2">
-                  <button onClick={() => setShowSettings(!showSettings)} className="p-2 hover:bg-blue-700 rounded-full transition" title="設定與同步">
-                    {showSettings ? <X size={20} /> : <Settings size={20} />}
-                  </button>
-                  <button onClick={handleLogout} className="p-2 hover:bg-blue-700 rounded-full transition ml-1" title="切換模式或帳號">
-                    <LogOut size={20} />
-                  </button>
+        <AppThemeContext.Provider value={themeValue}>
+          <div className="min-h-screen bg-gray-100 font-sans text-gray-800">
+            <div className="max-w-md mx-auto bg-white min-h-screen shadow-lg flex flex-col relative overflow-hidden">
+              
+              <header className={`${themeValue.t.bg} ${themeValue.headerText} p-4 shadow-md z-10 flex items-center justify-between transition-colors duration-300`}>
+                <div className="flex items-center gap-2 flex-1 overflow-hidden">
+                  {storageMode === 'cloud' ? <Cloud size={20} /> : <Smartphone size={20} />}
+                  <h1 className="text-xl font-bold truncate">
+                    {selectedActivity 
+                      ? selectedActivity.name 
+                      : (storageMode === 'cloud' ? `${displayName} 的紀錄` : '本機紀錄')}
+                  </h1>
                 </div>
-              )}
-            </header>
+                {!selectedActivityId && (
+                  <div className="flex items-center ml-2">
+                    <button onClick={() => setShowSettings(!showSettings)} className={`p-2 ${themeValue.t.bgHover} rounded-full transition`} title="設定與同步">
+                      {showSettings ? <X size={20} /> : <Settings size={20} />}
+                    </button>
+                    <button onClick={handleLogout} className={`p-2 ${themeValue.t.bgHover} rounded-full transition ml-1`} title="切換模式或帳號">
+                      <LogOut size={20} />
+                    </button>
+                  </div>
+                )}
+              </header>
 
-            <main className="flex-1 overflow-y-auto">
-              {showSettings ? (
-                <SettingsView 
-                  onBack={() => setShowSettings(false)}
-                  storageMode={storageMode}
-                  authUser={authUser}
-                  displayName={displayName}
-                  activities={activities}
-                  db={db}
-                  theme={theme}
-                  setTheme={setTheme}
-                />
-              ) : !selectedActivityId ? (
-                <HomeView 
-                  activities={activities}
-                  newActivityName={newActivityName}
-                  setNewActivityName={setNewActivityName}
+              <main className="flex-1 overflow-y-auto">
+                {showSettings ? (
+                  <SettingsView 
+                    onBack={() => setShowSettings(false)}
+                    storageMode={storageMode}
+                    authUser={authUser}
+                    displayName={displayName}
+                    activities={activities}
+                    db={db}
+                  />
+                ) : !selectedActivityId ? (
+                  <HomeView 
                   onAddActivity={handleAddActivity}
                   onAddRecord={handleAddRecord}
                   onSelectActivity={setSelectedActivityId}
@@ -534,6 +572,7 @@
     // Home View Component
     // ==========================================
     function HomeView({ activities, newActivityName, setNewActivityName, onAddActivity, onAddRecord, onSelectActivity, onLoadDefaults }) {
+      const { t } = useContext(AppThemeContext);
       const todayStr = new Date().toLocaleDateString('en-CA');
 
       return (
@@ -544,12 +583,12 @@
               value={newActivityName}
               onChange={(e) => setNewActivityName(e.target.value)}
               placeholder="輸入新追蹤項目 (例: 喝水)" 
-              className="flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg shadow-sm"
+              className={`flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 ${t.ring} text-lg shadow-sm`}
             />
             <button 
               type="submit" 
               disabled={!newActivityName.trim()}
-              className="bg-blue-600 text-white rounded-lg px-4 py-3 disabled:bg-blue-300 active:bg-blue-700 transition flex items-center shadow-sm"
+              className={`${t.bg} text-white rounded-lg px-4 py-3 ${t.bgDisabled} ${t.bgActive} transition flex items-center shadow-sm`}
             >
               <Plus size={24} />
             </button>
@@ -567,14 +606,14 @@
                 <div className="flex-1">
                   <h3 className="text-lg font-semibold text-gray-800">{activity.name}</h3>
                   <p className="text-sm text-gray-500 mt-1">
-                    總計: <span className="font-bold text-blue-600">{activity.records.length}</span> 次
+                    總計: <span className={`font-bold ${t.text}`}>{activity.records.length}</span> 次
                     <span className="mx-2 text-gray-300">|</span>
                     本日: <span className="font-bold text-green-600">{todayCount}</span> 次
                   </p>
                 </div>
                 <button 
                   onClick={(e) => onAddRecord(activity.id, e)}
-                  className="ml-4 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded-full h-12 w-12 flex items-center justify-center font-bold text-lg transition-colors shadow-sm active:scale-95"
+                  className={`ml-4 ${t.bgLight} ${t.textLight} ${t.bgLightHover} rounded-full h-12 w-12 flex items-center justify-center font-bold text-lg transition-colors shadow-sm active:scale-95`}
                 >
                   +1
                 </button>
@@ -587,7 +626,7 @@
                 {onLoadDefaults && (
                   <button 
                     onClick={onLoadDefaults}
-                    className="bg-blue-100 text-blue-700 px-6 py-2 rounded-xl font-bold shadow-sm hover:bg-blue-200 transition"
+                    className={`${t.bgLight} ${t.textLight} px-6 py-2 rounded-xl font-bold shadow-sm ${t.bgLightHover} transition`}
                   >
                     或點此載入預設項目
                   </button>
@@ -603,6 +642,7 @@
     // Detail & Calendar View Component
     // ==========================================
     function DetailView({ activity, onBack, onAddRecord, onRenameActivity, onDeleteRecord, onClearRecords, onDeleteActivity }) {
+      const { t } = useContext(AppThemeContext);
       const [currentMonth, setCurrentMonth] = useState(new Date());
       const [selectedDateStr, setSelectedDateStr] = useState(
         new Date().toLocaleDateString('en-CA') 
@@ -649,7 +689,7 @@
               <span>總計 {activity.records.length} 次</span>
               <span className="text-green-600">本日 {todayCount} 次</span>
             </div>
-            <button onClick={onAddRecord} className="text-blue-600 hover:bg-blue-50 p-2 rounded-full transition font-bold flex items-center gap-1">
+            <button onClick={onAddRecord} className={`${t.text} ${t.hoverBgLight} p-2 rounded-full transition font-bold flex items-center gap-1`}>
               <Plus size={20} /> 記一筆
             </button>
           </div>
@@ -680,14 +720,14 @@
                       <button 
                         onClick={() => setSelectedDateStr(dateStr)}
                         className={`w-10 h-10 rounded-full flex flex-col items-center justify-center relative transition-all
-                          ${isSelected ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-gray-100'}
-                          ${isToday && !isSelected ? 'border border-blue-600 text-blue-600' : ''}
+                          ${isSelected ? `${t.bg} text-white shadow-md` : 'hover:bg-gray-100'}
+                          ${isToday && !isSelected ? `border ${t.border} ${t.text}` : ''}
                           ${!isSelected && !isToday ? 'text-gray-700' : ''}
                         `}
                       >
                         <span className="text-sm">{day}</span>
                         {hasRecord && (
-                          <span className={`w-1.5 h-1.5 rounded-full mt-0.5 ${isSelected ? 'bg-white' : 'bg-blue-500'}`}></span>
+                          <span className={`w-1.5 h-1.5 rounded-full mt-0.5 ${isSelected ? 'bg-white' : t.calendarDot}`}></span>
                         )}
                       </button>
                     </div>
@@ -743,6 +783,7 @@
     // Rename Action Component
     // ==========================================
     function RenameAction({ currentName, onSave }) {
+      const { t } = useContext(AppThemeContext);
       const [isEditing, setIsEditing] = useState(false);
       const [name, setName] = useState(currentName);
 
@@ -753,11 +794,11 @@
               type="text" 
               value={name} 
               onChange={e => setName(e.target.value)} 
-              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className={`flex-1 border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 ${t.ring}`}
               autoFocus
             />
             <button onClick={() => { setIsEditing(false); setName(currentName); }} className="p-2 text-gray-500 hover:bg-gray-200 rounded-lg transition"><X size={18} /></button>
-            <button onClick={() => { onSave(name); setIsEditing(false); }} className="p-2 bg-blue-600 text-white hover:bg-blue-700 rounded-lg transition"><Check size={18} /></button>
+            <button onClick={() => { onSave(name); setIsEditing(false); }} className={`p-2 ${t.bg} text-white ${t.bgHover} rounded-lg transition`}><Check size={18} /></button>
           </div>
         );
       }
@@ -777,12 +818,13 @@
     // Record Item Component (For deleting specific time)
     // ==========================================
     function RecordItem({ recordItem, onDelete }) {
+      const { t } = useContext(AppThemeContext);
       const [confirming, setConfirming] = useState(false);
       
       return (
         <li className="flex items-center justify-between bg-gray-50 p-3 rounded-lg text-gray-700">
           <div className="flex items-center gap-3">
-            <Clock size={16} className="text-blue-500" />
+            <Clock size={16} className={t.textIcon} />
             <span className="font-medium text-lg">
               {recordItem.dateObj.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
             </span>
@@ -808,16 +850,10 @@
     // ==========================================
     // Settings & Sync View Component
     // ==========================================
-    function SettingsView({ onBack, storageMode, authUser, displayName, activities, db, theme, setTheme }) {
+    function SettingsView({ onBack, storageMode, authUser, displayName, activities, db }) {
+      const { t, themeColor, headerText, setThemeColor, setHeaderText } = useContext(AppThemeContext);
       const [statusMsg, setStatusMsg] = useState('');
       const [isProcessing, setIsProcessing] = useState(false);
-
-      const THEME_COLORS = [
-        { label: '經典藍', bg: 'bg-blue-600', code: '#2563eb' },
-        { label: '櫻花粉', bg: 'bg-pink-500', code: '#ec4899' },
-        { label: '夢幻紫', bg: 'bg-purple-600', code: '#9333ea' },
-        { label: '自然綠', bg: 'bg-green-600', code: '#16a34a' }
-      ];
 
       const TEXT_COLORS = [
         { label: '純淨白', text: 'text-white', code: '#ffffff' },
@@ -905,24 +941,24 @@
 
           <div className="p-4 space-y-6 flex-1 overflow-y-auto">
             {statusMsg && (
-              <div className="bg-blue-100 text-blue-800 p-3 rounded-xl text-center font-medium animate-pulse">
+              <div className={`${t.bgLight} ${t.textDark} p-3 rounded-xl text-center font-medium animate-pulse`}>
                 {statusMsg}
               </div>
             )}
 
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
               <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2">
-                <Palette size={20} className="text-pink-500"/> 外觀設定
+                <Palette size={20} className={t.textIcon}/> 外觀設定
               </h3>
               
               <div className="mb-5">
-                <p className="text-sm text-gray-600 mb-3">標題背景顏色：</p>
+                <p className="text-sm text-gray-600 mb-3">主題色彩：</p>
                 <div className="flex gap-4">
-                  {THEME_COLORS.map(c => (
+                  {Object.entries(THEMES).map(([key, c]) => (
                     <button 
-                      key={c.bg}
-                      onClick={() => setTheme({...theme, bg: c.bg})}
-                      className={`w-10 h-10 rounded-full shadow-md border-2 transition-transform hover:scale-110 ${theme.bg === c.bg ? 'border-gray-800 scale-110' : 'border-transparent'}`}
+                      key={key}
+                      onClick={() => setThemeColor(key)}
+                      className={`w-10 h-10 rounded-full shadow-md border-2 transition-transform hover:scale-110 ${themeColor === key ? 'border-gray-800 scale-110' : 'border-transparent'}`}
                       style={{ backgroundColor: c.code }}
                       title={c.label}
                     />
@@ -936,8 +972,8 @@
                   {TEXT_COLORS.map(c => (
                     <button 
                       key={c.text}
-                      onClick={() => setTheme({...theme, text: c.text})}
-                      className={`w-10 h-10 rounded-full shadow-md border-2 transition-transform hover:scale-110 flex items-center justify-center ${theme.text === c.text ? 'border-blue-500 scale-110' : 'border-gray-200'}`}
+                      onClick={() => setHeaderText(c.text)}
+                      className={`w-10 h-10 rounded-full shadow-md border-2 transition-transform hover:scale-110 flex items-center justify-center ${headerText === c.text ? 'border-gray-800 scale-110' : 'border-gray-200'}`}
                       style={{ backgroundColor: c.code }}
                       title={c.label}
                     >
@@ -952,9 +988,9 @@
               <div className="space-y-6">
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
                    <h3 className="font-bold text-gray-700 mb-2 flex items-center gap-2">
-                     <Cloud size={20} className="text-blue-500"/> 雲端同步管理
+                     <Cloud size={20} className={t.textIcon}/> 雲端同步管理
                    </h3>
-                   <p className="text-sm text-gray-500 mb-4">目前管理帳戶：<br/><span className="font-bold text-blue-600">{displayName}</span></p>
+                   <p className="text-sm text-gray-500 mb-4">目前管理帳戶：<br/><span className={`font-bold ${t.text}`}>{displayName}</span></p>
 
                    <div className="space-y-3 divide-y divide-gray-100">
                      <div className="py-3">
@@ -1015,6 +1051,7 @@
     }
 
     function ConfirmButton({ initLabel, confirmLabel, onClick, isDanger = false, disabled = false }) {
+      const { t } = useContext(AppThemeContext);
       const [confirming, setConfirming] = useState(false);
 
       if (confirming) {
@@ -1031,8 +1068,8 @@
               disabled={disabled}
               onClick={(e) => { e.stopPropagation(); onClick(); setConfirming(false); }}
               className={`flex-1 py-3 px-4 rounded-xl font-medium flex justify-center items-center gap-1 text-white shadow-sm transition
-                ${isDanger ? 'bg-red-600' : 'bg-blue-600'}
-                ${disabled ? 'opacity-50 cursor-not-allowed' : (isDanger ? 'active:bg-red-700' : 'active:bg-blue-700')}
+                ${isDanger ? 'bg-red-600' : t.bg}
+                ${disabled ? 'opacity-50 cursor-not-allowed' : (isDanger ? 'active:bg-red-700' : t.bgActive)}
               `}
             >
               <Check size={18} /> {confirmLabel}
@@ -1050,8 +1087,8 @@
             ${disabled ? 'opacity-50 cursor-not-allowed bg-gray-50' : (isDanger ? 'hover:bg-red-50' : 'hover:bg-gray-50')}
           `}
         >
-          {initLabel}
-          {isDanger && <Trash2 size={18} />}
+          <span className="px-2">{initLabel}</span>
+          {isDanger && <Trash2 size={18} className="mr-2" />}
         </button>
       );
     }
