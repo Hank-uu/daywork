@@ -155,6 +155,16 @@
           <path d="M16 3H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12l5-5V5a2 2 0 0 0-2-2z" />
           <polyline points="15 21 15 16 20 16" />
         </React.Fragment>
+      ),
+      List: (
+        <React.Fragment>
+          <line x1="8" y1="6" x2="21" y2="6"></line>
+          <line x1="8" y1="12" x2="21" y2="12"></line>
+          <line x1="8" y1="18" x2="21" y2="18"></line>
+          <line x1="3" y1="6" x2="3.01" y2="6"></line>
+          <line x1="3" y1="12" x2="3.01" y2="12"></line>
+          <line x1="3" y1="18" x2="3.01" y2="18"></line>
+        </React.Fragment>
       )
     };
 
@@ -196,6 +206,7 @@
     const Flame = (p) => <Icon name="Flame" {...p} />;
     const Bell = (p) => <Icon name="Bell" {...p} />;
     const StickyNote = (p) => <Icon name="StickyNote" {...p} />;
+    const List = (p) => <Icon name="List" {...p} />;
 
     // --- Firebase 設定 ---
     const firebaseConfig = {
@@ -641,6 +652,9 @@
       const [currentMonth, setCurrentMonth] = useState(new Date());
       const [selectedDateStr, setSelectedDateStr] = useState(new Date().toLocaleDateString('en-CA'));
       const [editName, setEditName] = useState(activity.name);
+      
+      // 新增 state 控制所有紀錄列表顯示與否
+      const [showAllRecords, setShowAllRecords] = useState(false);
 
       const recordsByDate = useMemo(() => {
         const map = {};
@@ -799,6 +813,55 @@
                 <select value={activity.groupId || 'default'} onChange={e=>onUpdateActivity({groupId: e.target.value})} className={`border border-gray-300 rounded px-2 py-1.5 outline-none text-sm bg-white max-w-[140px] truncate focus:ring-2 ${t.ring}`}>
                   {allGroups.map(g=><option key={g.id} value={g.id}>{g.name}</option>)}
                 </select>
+              </div>
+
+              {/* 增加功能：所有紀錄表列區塊 */}
+              <div className="flex flex-col gap-3 pt-4 border-t border-gray-100">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 font-medium text-gray-700">
+                    <List size={18} className="text-gray-400"/> 所有紀錄表列
+                  </div>
+                  <button onClick={() => setShowAllRecords(!showAllRecords)} className={`${t.bgLight} ${t.text} px-3 py-1.5 rounded shadow-sm text-sm font-bold transition-colors`}>
+                    {showAllRecords ? '隱藏' : '查看'}
+                  </button>
+                </div>
+
+                {showAllRecords && (
+                  <div className={`mt-2 border ${t.border} rounded-lg overflow-hidden transition-all duration-300`}>
+                    <div className="max-h-60 overflow-y-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead className={`${t.bgLight} ${t.text} sticky top-0 z-10`}>
+                          <tr>
+                            <th className={`px-3 py-2 border-b ${t.border} font-bold text-xs w-12 text-center shadow-sm`}>編號</th>
+                            <th className={`px-3 py-2 border-b ${t.border} font-bold text-xs shadow-sm`}>日期時間</th>
+                            <th className={`px-3 py-2 border-b ${t.border} font-bold text-xs shadow-sm`}>備註</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {activity.records.length > 0 ? (
+                            [...activity.records].sort((a,b)=>new Date(typeof b === 'string' ? b : b.timestamp)-new Date(typeof a === 'string' ? a : a.timestamp)).map((r, i) => {
+                              const rObj = typeof r === 'string' ? { timestamp: r, memo: '' } : r;
+                              const d = new Date(rObj.timestamp);
+                              return (
+                                <tr key={rObj.timestamp} className={`hover:${t.bgLightHover} transition-colors`}>
+                                  <td className={`px-3 py-2 border-b ${t.border} text-xs ${t.text} text-center font-medium`}>{activity.records.length - i}</td>
+                                  <td className={`px-3 py-2 border-b ${t.border} text-xs ${t.text}`}>
+                                    {d.toLocaleDateString('zh-TW')} {d.toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit', hour12:false})}
+                                  </td>
+                                  <td className={`px-3 py-2 border-b ${t.border} text-xs ${t.text}`}>{rObj.memo || '-'}</td>
+                                </tr>
+                              )
+                            })
+                          ) : (
+                            <tr>
+                              <td colSpan="3" className={`px-3 py-6 text-center text-sm ${t.text}`}>目前尚無紀錄</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
