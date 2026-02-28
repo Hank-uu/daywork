@@ -468,15 +468,56 @@
       };
       const currentWeekStart = getStartOfWeek(now);
 
-      const calculateStreak = (records) => {
-        if (!records.length) return 0;
-        const days = Array.from(new Set(records.map(r => new Date(typeof r === 'string' ? r : r.timestamp).toLocaleDateString('en-CA')))).sort().reverse();
+      const calculateStreak = (records, targetNum, targetType) => {
+        if (!records.length || targetNum <= 0) return 0;
+        
+        const getPeriodKey = (dateStr) => {
+          const d = new Date(dateStr);
+          if (targetType === 'yearly') return d.getFullYear().toString();
+          if (targetType === 'monthly') return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}`;
+          if (targetType === 'weekly') {
+            const day = d.getDay();
+            const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+            const start = new Date(d);
+            start.setDate(diff);
+            return start.toLocaleDateString('en-CA');
+          }
+          return new Date(dateStr).toLocaleDateString('en-CA');
+        };
+
+        const counts = {};
+        records.forEach(r => {
+          const key = getPeriodKey(typeof r === 'string' ? r : r.timestamp);
+          counts[key] = (counts[key] || 0) + 1;
+        });
+
         let streak = 0;
         let checkDate = new Date();
-        for (let i = 0; i < days.length; i++) {
-          const d = new Date(days[i]);
-          const diff = Math.floor((checkDate - d) / (1000 * 60 * 60 * 24));
-          if (diff <= 1) { streak++; checkDate = d; } else break;
+
+        let currentKey = getPeriodKey(checkDate);
+        if ((counts[currentKey] || 0) >= targetNum) streak++;
+
+        const stepBack = (d) => {
+          const newD = new Date(d);
+          if (targetType === 'yearly') newD.setFullYear(newD.getFullYear() - 1);
+          else if (targetType === 'monthly') newD.setMonth(newD.getMonth() - 1);
+          else if (targetType === 'weekly') newD.setDate(newD.getDate() - 7);
+          else newD.setDate(newD.getDate() - 1);
+          return newD;
+        };
+
+        if (streak === 0) {
+          checkDate = stepBack(checkDate);
+          currentKey = getPeriodKey(checkDate);
+          if ((counts[currentKey] || 0) >= targetNum) streak++;
+          else return 0;
+        }
+
+        while (true) {
+          checkDate = stepBack(checkDate);
+          currentKey = getPeriodKey(checkDate);
+          if ((counts[currentKey] || 0) >= targetNum) streak++;
+          else break;
         }
         return streak;
       };
@@ -522,7 +563,7 @@
                 }
 
                 const progress = targetNum > 0 ? Math.min(100, (currentCount / targetNum) * 100) : 0;
-                const streak = calculateStreak(a.records);
+                const streak = calculateStreak(a.records, targetNum, tType);
                 
                 return (
                   <div key={a.id} onClick={() => onSelectActivity(a.id)} className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm hover:shadow-md transition cursor-pointer">
