@@ -291,6 +291,16 @@
         }
       }, [activities, groups, storageMode]);
 
+      // --- 新增這兩段：當主題或文字顏色改變時，寫入 localStorage 儲存 ---
+      useEffect(() => {
+        localStorage.setItem('tracker_theme_color', themeColor);
+      }, [themeColor]);
+
+      useEffect(() => {
+        localStorage.setItem('tracker_header_text', headerText);
+      }, [headerText]);
+      // -------------------------------------------------------------
+
       // 提醒功能邏輯 - 使用 24 小時制比對
       useEffect(() => {
         const interval = setInterval(() => {
